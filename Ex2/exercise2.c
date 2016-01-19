@@ -17,7 +17,7 @@ void *thread1(){
 
 void *thread2(){
 	pthread_mutex_lock(&mutex_j);
-	for (i = 0; i < 100000; i++){
+	for (i = 0; i < 1000000; i++){
 		j--;
 	}
 	pthread_mutex_unlock(&mutex_j);
