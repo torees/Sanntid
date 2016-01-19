@@ -1,20 +1,26 @@
 #include <pthread.h>
 #include <stdio.h>
+#include <time.h>
 
 
-int j = 0;
+int j,i = 0;
+pthread_mutex_t mutex_j = PTHREAD_MUTEX_INITIALIZER;
 
 void *thread1(){
-	for (int i = 0; i < 1000000; i++){
+	pthread_mutex_lock(&mutex_j);
+	for (i = 0; i < 1000000; i++){
 		j++;
 	}
+	pthread_mutex_unlock(&mutex_j);
 	return 0;
 }
 
 void *thread2(){
-	for (int i = 0; i < 1000000; i++){
+	pthread_mutex_lock(&mutex_j);
+	for (i = 0; i < 100000; i++){
 		j--;
 	}
+	pthread_mutex_unlock(&mutex_j);
 	return 0;
 }
 
@@ -30,7 +36,7 @@ int main(){
 	pthread_join(someThread2, NULL);
 
 
-
+	pthread_mutex_destroy(&mutex_j);
 	printf("%d \n", j);
 
 	return 0;
