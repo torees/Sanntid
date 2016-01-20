@@ -6,24 +6,39 @@ import (
 	"runtime"
 )
 
-var i = 0
 
-func thread1(){
+
+
+func thread1(guard chan int){
+	
+	
 	for j:= 0; j <100000; j++{
+		i:=<-guard
 		i+=1
+		guard <- i
 	}
+	
+	
 }
 
-func thread2(){
-	for j:= 0; j <99999; j++{
+func thread2(guard chan int){
+	for j:= 0; j <10000; j++{
+		i:=<-guard
 		i-=1
+		guard <- i
 	}
 }
 
 func main(){
+	var i = 0
 	runtime.GOMAXPROCS(runtime.NumCPU())
-	go thread1()
-	go thread2()
+	guard := make(chan int,1)
+
+	guard <- i
+	go thread1(guard)
+	go thread2(guard)
+	
 	time.Sleep(1000*time.Millisecond)
-	fmt.Println(i)
+	
+	fmt.Println("nubmer: ",<-guard)
 }
