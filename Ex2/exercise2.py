@@ -1,4 +1,4 @@
-import thread,time,Queue
+import thread,time,Queue,Locks
 #hallo
 
 i = 0
