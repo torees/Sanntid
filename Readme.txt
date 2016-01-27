@@ -15,3 +15,10 @@ to remove a file from local repo: delete manually or with git rm <name>
 git add -u
 #normal commit and push
 done!
+
+
+To work on a separate branch while doing radical changes or cooparating.
+git checkout -b <newbranch> #creates a new branch with name newbranch
+git checkout <whatbranch>  #switch between branches in local repository
+#new branches need to be committed and pushed as normally to add to remote repo. 
+git push origin <whatbranch>
