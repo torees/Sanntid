@@ -29,9 +29,6 @@ func main() {
 
 	*/
 	go golisten()
-
-	waitchan := make(chan int)
-	<-waitchan
 	/*for{
 		message := []byte("Hello my old friend")
 		_, err = connection.Write(message)
