@@ -4,7 +4,7 @@ import (
 	"fmt"	
 	"net"
 	"os"
-	"time"
+	
 )
 
 
@@ -18,7 +18,7 @@ func CheckForError(err error){
 
 func main() {
 	//connect to port 20000 + n
-	adress,err := net.ResolveUDPAddr("udp","129.241.187.23:20023")
+	adress,err := net.ResolveUDPAddr("udp","129.241.187.23:20003")
 	CheckForError(err)
 
 	// listen at port
@@ -29,7 +29,7 @@ func main() {
 
 	
 	go golisten()
-	for{
+	/*for{
 		message := []byte("Hello my old friend")
 		_, err = connection.Write(message)
 		if err != nil{
@@ -40,13 +40,14 @@ func main() {
 		time.Sleep(time.Second *1)
 
 		
-	}
+	}*/
 
 }
 
 func golisten(){
+
 	recvbuffer := make([]byte,1024)
-	adr,err := net.ResolveUDPAddr("udp",":20023")
+	adr,err := net.ResolveUDPAddr("udp",":20003")
 	if err != nil{
 			fmt.Println("Error in resolve: ",err)
 		}

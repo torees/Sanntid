@@ -18,7 +18,7 @@ func CheckForError(err error){
 
 func main() {
 	//connect to port 30000
-	adress,err := net.ResolveUDPAddr("udp",":30000")
+	adress,err := net.ResolveUDPAddr("udp",":20003")
 	CheckForError(err)
 
 	// listen at port
