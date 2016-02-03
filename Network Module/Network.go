@@ -44,7 +44,7 @@ func main(){
 }
 
 func ClientConnectUDP(port string, connectionChanSend chan *net.UDPConn){
-	adress,_ :=net.ResolveUDPAddr("udp"," "+port)
+	adress,_ :=net.ResolveUDPAddr("udp","129.241.187.20"+port)
 	conn,err := net.DialUDP("udp",nil,adress)
 	if err == nil{
 		fmt.Println("Connection achieved at : ",adress)
@@ -58,8 +58,9 @@ func ClientSend(connectionChanSend chan *net.UDPConn){
 	for{
 		fmt.Println("Type: ")
 		text,_ := keyread.ReadString('\n')
+
 		msg := []byte(text)
-		conn.Write(msg)
+		_,_= conn.Write(msg)
 		time.Sleep(time.Second*1)
 	}
 
