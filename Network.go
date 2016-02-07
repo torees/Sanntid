@@ -6,7 +6,7 @@ import (
 	"os"
 	"time"
 	"bufio"
-	"driver"
+	"./driver"
 	
 )
 
@@ -20,18 +20,19 @@ type UDPmsg struct{
 
 
 func main(){
-	ListenPort := ":12345"
+	/*ListenPort := ":12345"
 	SendPort := ":12345"
 	connectionChanListen := make(chan *net.UDPConn,10)
 	connectionChanSend := make(chan *net.UDPConn)
+	
+	recvChan := make(chan UDPmsg,5)*/
 	waitChan := make(chan int)
-	recvChan := make(chan UDPmsg,5)
 
-
-
+	driver.ElevatorInit()
+	driver.SetButtonLamp(2,1,1)
+	driver.SetFloorIndicator(1)
 	//fmt.Println("Starting server...")
-	time.Sleep(time.Second *1)
-
+	
 	/*go ServerConnectUDP(ListenPort,connectionChanListen)
 	go ServerListenUDP(connectionChanListen, recvChan)
 	go serverPrint(recvChan)
