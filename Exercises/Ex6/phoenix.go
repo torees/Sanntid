@@ -13,7 +13,7 @@ import(
 func main(){
 	master := false
 	var i uint64 = 0
-	port := ":30005"
+	port := ":50505"
 	
 	udpConn,addr:= ClientConnectUDP(port)
 
