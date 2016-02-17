@@ -13,23 +13,22 @@ import (
 
 func main(){
 	master := false
-	checkCountFlag := false
+	
 	pingPort := ":50001"
 	countValuePort := ":50002"
 	pingConn := ClientConnectUDP(pingPort)
 	countConn := ClientConnectUDP(countValuePort)
 	
 	timeOut:= make(chan int)
-	pingRecv:= make(chan int,2)
-	quite:= make(chan int)
+	pingRecv:= make(chan int)
 
 
 	
-	valueChan := make(chan int,20)
+	//valueChan := make(chan int)
 	
 	go checkPing(pingPort,pingRecv,timeOut)
 	i:= 0
-	cmd:= exec.Command("gnome-terminal","-x","go", "run", "main.go")
+	cmd:= exec.Command("gnome-terminal"," -x","go run /home/student/Documents/Sanntid/main.go")
 	
 	for !master{
 
@@ -38,33 +37,22 @@ func main(){
 				fmt.Println("Dobby is slave no more! ")
 				master = true
 				
-				//quite<-1
 				
-				checkCountFlag = false
-				
-				
-				
+				//timeout
 			case <- pingRecv:
-				
-				//fmt.Println("ping received ","i: ",i)
-				if(!checkCountFlag){
-					go checkCountVal(valueChan,countValuePort,quite)
-					checkCountFlag = true
-				}
+				fmt.Println("tick")
 				
 			
 
 			default:
 				//fmt.Println("still slave")
-				
+				//i=<-valueChan
 
 
 		}
 	}
 
-	if i != 0{
-		i=<-valueChan
-	}
+
 	go pingThread(pingConn)
 	cmd.Output()
 	for{
@@ -78,21 +66,16 @@ func main(){
 
 
 
-
-func checkCountVal(valueChan chan int,countValuePort string,quite chan int){
+func checkCountVal(valueChan chan int,countValuePort string){
 	ServAddr,_ := net.ResolveUDPAddr("udp",countValuePort)
 	ServConn,_ := net.ListenUDP("udp",ServAddr)
 	buf := make([]byte,1024)
 	for{
-		n,_,err:=ServConn.ReadFromUDP(buf)
-		if err != nil{
-			ServConn.Close()
-		}
-		str := string(buf[0:n])
-		
-		intval,_ := strconv.Atoi(str)		
-		valueChan <-intval
-
+		n,_,_ := ServConn.ReadFromUDP(buf)
+		str := string(buf[:n])
+		fmt.Println(str)
+		/*intval := strconv.Atoi(str)
+		valueChan <-intval*/
 	}
 
 }
@@ -125,18 +108,18 @@ func checkPing(pingPort string, pingRecv chan int,timeOut chan int){
 	ServAddr,_ := net.ResolveUDPAddr("udp",pingPort)
 	ServConn,_ := net.ListenUDP("udp",ServAddr)
 	
+	
 	buf := make([]byte,1024)
 	for{
-		//fmt.Println("Dobby is slave! ")
-		fmt.Println("set deadline")
+		fmt.Println("Dobby is slave! ")
 		ServConn.SetReadDeadline(time.Now().Add(time.Second*1))
-		//fmt.Println("Slaving away...")		
+		fmt.Println("Slaving away...")		
 	
-		_,_,err:=ServConn.ReadFromUDP(buf)		
+		_,_,err:=ServConn.ReadFromUDP(buf)
+		fmt.Println("Dobby NOT slave! ")
 		if err != nil{
-			fmt.Println("timeout")
+			fmt.Println("error not nil")
 			timeOut<-1
-			ServConn.Close()
 
 		}
 		pingRecv <- 1
