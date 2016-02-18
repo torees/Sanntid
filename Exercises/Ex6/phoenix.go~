@@ -16,8 +16,6 @@ func main(){
 	master := false
 	var i uint64 = 0
 	port := ":12332"
-	ipAdd,_ := net.InterfaceAddrs()		
-	fmt.Println(strings.Split(ipAdd[1].String(),"/")[0])
 
 	for(!network){
 		ipAdd,_ := net.InterfaceAddrs()		
@@ -32,11 +30,12 @@ func main(){
 	
 		
 	
-	time.Sleep(time.Second*1)
+	time.Sleep(time.Second*3)
 	buffer := make([]byte,8)
 
 	for !(master){
 		udpConn.SetReadDeadline(time.Now().Add(time.Second*2))
+		
 		n,_,err:=udpConn.ReadFromUDP(buffer)		
 		
 		

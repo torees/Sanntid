@@ -1,4 +1,4 @@
-package main
+package network
 
 import (
 	"fmt"
@@ -6,11 +6,17 @@ import (
 	"os"
 	"time"
 	"bufio"
+	"./message"
 	
 	
 )
 
+
 type UDPmsg struct{
+	ping bool
+	elevatorButtonPressed bool
+	elevatorPositionUpdate bool
+
 	size int
 	msg string
 
@@ -41,28 +47,35 @@ func main(){
 
 
 }
-
-func ClientConnectUDP(port string, connectionChanSend chan *net.UDPConn){
-	adress,_ :=net.ResolveUDPAddr("udp","129.241.187.20"+port)
-	conn,err := net.DialUDP("udp",nil,adress)
-	if err == nil{
-		fmt.Println("Connection achieved at : ",adress)
+func checkNetworkConnection(networkAccessChannel chan bool){	
+	for{
+		ip := getNetworkIP()
+		if(ip == "::1"){
+			networkAccessChannel<-false			
+		}
 	}
-	connectionChanSend <- conn
 }
 
-func ClientSend(connectionChanSend chan *net.UDPConn){
-	conn := <-connectionChanSend
-	keyread := bufio.NewReader(os.Stdin)
-	for{
-		fmt.Println("Type: ")
-		text,_ := keyread.ReadString('\n')
+func getNetworkIP()string{
+	ipAdd,_ := net.InterfaceAddrs()		
+	ip:=strings.Split(ipAdd[1].String(),"/")[0]
+	return ip
+}
 
-		msg := []byte(text)
-		_,_= conn.Write(msg)
-		time.Sleep(time.Second*1)
+
+func ClientConnectUDP(port string, ip string) (*net.UDPConn,*net.UDPAddr){
+	adress,_ :=net.ResolveUDPAddr("udp",ip+port)
+	conn,err := net.DialUDP("udp",nil,adress)
+	if err == nil{
+		fmt.Println("Connection achieved ")
 	}
+	return conn,adress
+}
 
+func ClientSend(somestruct MSGstruct){	
+	msg:=somestruct.somemessagefunc()
+	_,_= conn.Write(msg)
+	time.Sleep(time.Second*1)	
 }
 
 
@@ -74,31 +87,21 @@ func ServerConnectUDP(port string, connectionChanListen chan *net.UDPConn){
 	
 	ServAddr,err := net.ResolveUDPAddr("udp",port)
 	if err  != nil {
-        fmt.Println("Error: " , err)
-        os.Exit(0)
-    }
+      		fmt.Println("Error: " , err)
+        		os.Exit(0)
+    	}
 
-    ServConn, err := net.ListenUDP("udp",ServAddr)
-    if err  != nil {
-        fmt.Println("Error: " , err)
-        os.Exit(0)
-    }
-    fmt.Println("UDP connection established...")
-    connectionChanListen <- ServConn
+	    ServConn, err := net.ListenUDP("udp",ServAddr)
+	    if err  != nil {
+	        fmt.Println("Error: " , err)
+	        os.Exit(0)
+	    }
+	    fmt.Println("UDP connection established...")
+	    connectionChanListen <- ServConn
 
 }
 
 
-
-func serverPrint(recvChan chan UDPmsg){
-	for {
-		fmt.Println("waiting ..")
-		printmsg := <-recvChan
-		fmt.Println("MSG: ",printmsg.msg)
-
-		
-	}
-}
 
 
 func ServerListenUDP(connectionChanListen chan *net.UDPConn,recvChan chan UDPmsg){
