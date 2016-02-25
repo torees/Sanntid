@@ -11,15 +11,11 @@ const{
 	OrderButtonPushed = 1
 	ElevatorStateUpdate = 2
 	QueueNewOrder = 3
-
 }
 
 type UDPMessage struct{
-	MessageSource string
-	MessageSource string
-
 	MessageId int
-
+	MessageTargetIP string
 	OrderButton int
 	ElevatorFloor int
 	ElevatorFloorTarget int 
@@ -35,4 +31,9 @@ func UDPMessageEncode(Msg UDPMessage){
 
 func UDPMessageDecode(Msg UDPMessage, UDParray []byte){
 	
+}
+
+func (msg *UDPMessage)CalculateChecksum() int{
+	msg.Checksum = msg.MessageId%7+msg.OrderButton%7+msg.OrderButton%7
+	msg.Checksum += msg.ElevatorFloor%7
 }
