@@ -24,11 +24,15 @@ type LocalQueue struct {
 
 func main() {
 	fmt.Println("hello world")
+	driver.ElevatorInit()
 	var local LocalQueue
 	fmt.Println(local)
 	for {
 		local = CheckOrderButton(local)
 		fmt.Println(local)
+		fmt.Println(driver.ButtonPushed(2, 1))
+		time.Sleep(time.Second * 1)
+
 	}
 }
 func ElevatorManager() {
