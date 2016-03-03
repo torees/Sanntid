@@ -1,6 +1,7 @@
 package message
 
 import (
+	"fmt"
 	"encoding/json"
 )
 //Message ID
