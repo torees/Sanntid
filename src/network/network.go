@@ -15,29 +15,34 @@ import (
 
 
 func ClientConnectUDP(port string)*net.UDPConn{
-	adress,_ :=net.ResolveUDPAddr("udp","10.20.90.60"+port)
-	conn,err := net.DialUDP("udp",nil,adress)
+	fmt.Println("hello from client")
+	adress,err :=net.ResolveUDPAddr("udp","129.241.187.255"+port)
+	if (err != nil){
+		fmt.Println("somethings up")
+		fmt.Println(adress,err)
+	}
+
+	connection,err := net.DialUDP("udp",nil,adress)
 	if err == nil{
 		fmt.Println("Connection achieved at : ",adress)
 	}
-	return conn
+	return connection
 }
 
-func ServerConnectUDP(port string, connectionChanListen chan *net.UDPConn){
+func ServerConnectUDP(port string)*net.UDPConn{
 	
-	ServAddr,err := net.ResolveUDPAddr("udp",port)
+	adress,err := net.ResolveUDPAddr("udp",port)
 	if err  != nil {
         fmt.Println("Error: " , err)
         os.Exit(0)
     }
 
-    ServConn, err := net.ListenUDP("udp",ServAddr)
+    connection, err := net.ListenUDP("udp",adress)
     if err  != nil {
         fmt.Println("Error: " , err)
         os.Exit(0)
     }
-    fmt.Println("UDP connection established...")
-    connectionChanListen <- ServConn
+    return connection
 
 }
 
@@ -48,13 +53,12 @@ func ClientSend(conn *net.UDPConn,msg []byte ){
 
 
 
-func ServerListenUDP(conn net.UDPConn,recvChan chan []byte){
-	buf := make([]byte,1024)
-	fmt.Println("Listening for messages on port")
-	for{
-		n,_,_ := conn.ReadFromUDP(buf)
-		recvChan <- buf[0:n]
-	}
+func ServerListenUDP(conn *net.UDPConn,buf []byte)int{
+	buff := make([]byte,1024)
+	fmt.Println("listening")
+	n,_,_ := conn.ReadFromUDP(buff)
+	fmt.Println("BUF", buff)
+	return n
 
 }
 
