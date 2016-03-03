@@ -5,10 +5,10 @@ import (
 )
 //Message ID
 const(
-	Ping = 0
-	OrderButtonPushed = 1
-	ElevatorStateUpdate = 2
-	QueueNewOrder = 3
+	Ping = 1
+	OrderButtonPushed = 2
+	ElevatorStateUpdate = 3
+	QueueNewOrder = 4
 )
 
 type UDPMessage struct{
@@ -24,7 +24,7 @@ func UDPMessageEncode(Msg UDPMessage)([]byte, error){
 	return json.Marshal(Msg)
 }
 
-func UDPMessageDecode(Msg *UDPMessage, UDParray []byte) error{
+func UDPMessageDecode(Msg *UDPMessage, UDParray []byte){
 	json.Unmarshal(UDParray, Msg)
 }
 

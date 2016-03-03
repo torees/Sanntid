@@ -15,10 +15,8 @@ import (
 
 
 func ClientConnectUDP(port string)*net.UDPConn{
-	fmt.Println("hello from client")
 	adress,err :=net.ResolveUDPAddr("udp","129.241.187.255"+port)
 	if (err != nil){
-		fmt.Println("somethings up")
 		fmt.Println(adress,err)
 	}
 

@@ -9,8 +9,8 @@ import(
 )
 
 const(
-	sendPingPort = ":40000"
-	ListenPingPort = ":40001"
+	sendPingPort = ":20011"
+	ListenPingPort = ":33333"
 	listenElevCom = ":40002"
 	sendElevCom = ":40003"
 	)
@@ -52,7 +52,7 @@ func main(){ //function should be renamed afterwards, this is just for testing
 func sendPing(conn *net.UDPConn){
 	pingMsg := message.UDPMessage{message.Ping,"",0,0,0,0}
 	encodedMsg,_ :=message.UDPMessageEncode(pingMsg)
-
+	defer conn.Close()
 	for{
 		network.ClientSend(conn, encodedMsg)
 		time.Sleep(time.Millisecond*250)
@@ -62,12 +62,17 @@ func sendPing(conn *net.UDPConn){
 }
 
 func listenPing(conn *net.UDPConn){
-	//var ping message.UDPMessage
+	var ping message.UDPMessage
 	buf := make([]byte,1024)
+	defer conn.Close()
 	for{
 		n := network.ServerListenUDP(conn, buf)
-		fmt.Println("buf", buf[0:n])		}
+		//fmt.Println("buf", buf[0:n])
+		b := buf[0:n]
+		message.UDPMessageDecode(&ping,b)
+		fmt.Println(ping)
 	}
+}
 
 
 
