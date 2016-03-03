@@ -54,10 +54,7 @@ func ClientSend(conn *net.UDPConn,msg []byte ){
 
 
 func ServerListenUDP(conn *net.UDPConn,buf []byte)int{
-	buff := make([]byte,1024)
-	fmt.Println("listening")
-	n,_,_ := conn.ReadFromUDP(buff)
-	fmt.Println("BUF", buff)
+	n,_,_ := conn.ReadFromUDP(buf)
 	return n
 
 }

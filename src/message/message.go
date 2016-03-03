@@ -25,7 +25,7 @@ func UDPMessageEncode(Msg UDPMessage)([]byte, error){
 }
 
 func UDPMessageDecode(Msg *UDPMessage, UDParray []byte) error{
-	return json.Unmarshal(UDParray, Msg)
+	json.Unmarshal(UDParray, Msg)
 }
 
 func CalculateChecksum(Msg *UDPMessage)int{ // not a very good crc, just for testing 
