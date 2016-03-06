@@ -16,7 +16,6 @@ const(
 
 func main(){ //function should be renamed afterwards, this is just for testing
 	var myIp string
-	waitChan := make(chan int)
 	for{
 		 myIp = network.GetNetworkIP()
 		if(!(myIp == "::1")){
@@ -26,50 +25,111 @@ func main(){ //function should be renamed afterwards, this is just for testing
 	}
 	fmt.Println("My IP", myIp)
 
-	//sendPingChan := make(chan *net.UDPConn,10)
+	UDPSendMsgChan := make(chan message.UDPMessage,100)
+	UDPPingReceivedChan := make(chan message.UDPMessage,100)
+	UDPOrderReceivedChan := make(chan message.UDPMessage,100)
+	UDPElevatorStateUpdateChan := make(chan message.UDPMessage,100)
 	//listenPingChan := make(chan bool, 1)
 	// sendElevComChan :=make(chan *net.UDPConn, 10)
 	// listenElevComChan := make(chan *net.UDPConn, 10)
 
 	//init sockets for sending ping and messages 
-	sendPingConn:= network.ClientConnectUDP(UDPPort)
+	UDPSendConn:= network.ClientConnectUDP(UDPPort)
 	//sendElevComConn := network.ClientConnectUDP(sendElevCom)
 
-	listenPingConn := network.ServerConnectUDP(UDPPort)
+	UDPlistenConn := network.ServerConnectUDP(UDPPort)
 	//listenElevComConn := network.ServerConnectUDP(listenElevCom)
 
-	go sendPing(sendPingConn)
-	go listenPing(listenPingConn)
+	go UDPsend(UDPSendConn, UDPSendMsgChan, myIp)
+	go UDPlisten(UDPlistenConn, UDPPingReceivedChan, UDPOrderReceivedChan,UDPElevatorStateUpdateChan)
 
-	<-waitChan
+	for{
+		select{
+			case msg := <-UDPPingReceivedChan:
+				fmt.Println("ping received from: ", msg.IP)
+			case msg := <- UDPOrderReceivedChan:
+				fmt.Println("order received: ", msg.OrderQueue)
+			case msg := <- UDPElevatorStateUpdateChan:
+				fmt.Println("State update : ", msg.ElevatorStateUpdate)
+
+		}
+	}
 	
 
 }
 
-func sendPing(conn *net.UDPConn){
-	defer conn.Close()
-	pingMsg := message.UDPMessage{message.Ping,"Hallo",0,0,0,0}
-	encodedMsg,_ :=message.UDPMessageEncode(pingMsg)
-	defer conn.Close()
-	for{
-		network.ClientSend(conn, encodedMsg)
-		time.Sleep(time.Millisecond*250)
-		fmt.Println("ping sent")
-
-	}
-}
-
-func listenPing(conn *net.UDPConn){
+func UDPsend(conn *net.UDPConn, UDPMsgChan chan message.UDPMessage, IP string){
 	defer conn.Close()
 	var ping message.UDPMessage
-	buf := make([]byte,1024)
+	
+	
+//msg created for testing purposes --------------------
+	var msg message.UDPMessage
+	msg.IP = IP
+	msg.MessageId = message.NewOrder
+	msg.OrderQueue = [12]int{1,0,0,0,0,0,0,0,0,0,0,0}
+	ticker2 := time.NewTicker(time.Millisecond*2500).C
+	var msg2 message.UDPMessage
+	msg2.IP = IP
+	msg2.MessageId = message.ElevatorStateUpdate
+	msg.ElevatorStateUpdate = [2]int{1,0}
+	ticker3 := time.NewTicker(time.Millisecond*3500).C
+//----------------------------
+
+	ping.IP = IP
+	ping.MessageId = message.Ping
+	encodedPing,_ :=message.UDPMessageEncode(ping)
+	ticker := time.NewTicker(time.Millisecond*250).C
+
+
+
 	defer conn.Close()
 	for{
+		select{
+			case <- ticker:
+				network.ClientSend(conn, encodedPing)
+
+			case msg := <-UDPMsgChan:
+				encodedMsg,_:= message.UDPMessageEncode(msg)
+				network.ClientSend(conn, encodedMsg)
+			
+			// testing --------------------------	
+			case <- ticker2:
+				UDPMsgChan <- msg
+			case <- ticker3:
+				UDPMsgChan <- msg2		
+			//-------------------------------------	
+		}
+	}
+
+}
+
+func UDPlisten(conn *net.UDPConn, UDPPingReceivedChan chan message.UDPMessage, UDPOrderReceivedChan chan message.UDPMessage, UDPElevatorStateUpdateChan chan message.UDPMessage){
+	defer conn.Close()
+	var msg message.UDPMessage
+	buf := make([]byte,1024)
+	for{
+		
 		n := network.ServerListenUDP(conn, buf)
-		//fmt.Println("buf", buf[0:n])
 		b := buf[0:n]
-		message.UDPMessageDecode(&ping,b)
-		fmt.Println(ping)
+		message.UDPMessageDecode(&msg,b)
+
+		switch msg.MessageId{
+			case message.Ping:
+				UDPPingReceivedChan <- msg
+				break
+			case message.ElevatorStateUpdate:
+				UDPElevatorStateUpdateChan <- msg
+				break
+			case message.NewOrder:
+				UDPOrderReceivedChan <- msg
+				break
+			default:
+				//Fault tolerance, shut down?  
+
+		}
+
+
 	}
 }
 

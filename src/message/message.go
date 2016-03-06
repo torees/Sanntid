@@ -6,17 +6,15 @@ import (
 //Message ID
 const(
 	Ping = 1
-	OrderButtonPushed = 2
-	ElevatorStateUpdate = 3
-	QueueNewOrder = 4
+	ElevatorStateUpdate = 2
+	NewOrder = 3
 )
 
 type UDPMessage struct{
 	MessageId int
-	MessageTargetIP string
-	OrderButton int
-	ElevatorFloor int
-	ElevatorFloorTarget int 
+	IP string
+	OrderQueue [12]int// 
+	ElevatorStateUpdate [2]int // [0] = state, [1] = position
 	Checksum int 
 }
 
@@ -29,8 +27,7 @@ func UDPMessageDecode(Msg *UDPMessage, UDParray []byte){
 }
 
 func CalculateChecksum(Msg *UDPMessage)int{ // not a very good crc, just for testing 
-	c := Msg.MessageId%7+Msg.OrderButton%7+Msg.OrderButton%7
-	c += Msg.ElevatorFloor%7
+	c := Msg.MessageId%7+Msg.OrderQueue[0]%7+Msg.ElevatorStateUpdate[0]%7
 	return c
 }
 
