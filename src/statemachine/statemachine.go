@@ -30,6 +30,10 @@ func main() {
 	queueChan := make(chan LocalQueue)
 	go ElevPosition(positionChan)
 	go CheckOrderButton(queueChan)
+	driver.ElevStart(1)
+	<-positionChan
+	driver.ElevStart(0)
+	fmt.Println("inlitialized")
 
 	fstate := idle
 	for {
@@ -39,12 +43,7 @@ func main() {
 }
 func ElevManager(local LocalQueue, fstate State, positionChan chan int, nextTarget chan int, queueChan chan LocalQueue) {
 
-	//local = <-queueChan
-	//fmt.Println(local)
-	//fmt.Println(driver.ButtonPushed(2, 1))
-	//time.Sleep(time.Second * 1)
-	//Lights(local)
-	//var target int
+	var target int
 
 	fmt.Println(<-positionChan)
 	/*
