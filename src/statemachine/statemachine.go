@@ -9,146 +9,143 @@ import (
 type State int
 
 const N_FLOORS = 4
+
 const (
 	idle State = iota
 	running
 	doorOpen
 )
 
-type LocalQueue struct {
-	internal [4]int
-	down     [4]int
-	up       [4]int
+type orderQueue struct {
+	internal [N_FLOORS]int
+	down     [N_FLOORS]int
+	up       [N_FLOORS]int
 }
 
 func main() {
-	var local LocalQueue
+	//variables
+	
+	var elevDir int
+
 	fmt.Println("Starting Elevator 3000...")
 	driver.ElevInit()
-	positionChan := make(chan int)
 
-	queueChan := make(chan LocalQueue)
-	LocalChan := make(chan LocalQueue, 10)
-	reset := make(chan int)
-	go ElevPosition(positionChan)
-	go CheckOrderButton(queueChan, LocalChan, reset)
+	//channels
+	positionChan := make(chan int)
+	directionChan := make(chan int) //keeps an int that is the elevators primary direction.
+	queueChan := make(chan orderQueue)
+	orderButtonChan := make(chan orderQueue)
+
+
+	//initialization procedure.
 	driver.ElevStart(1)
 	<-positionChan
 	driver.ElevStart(0)
 	fmt.Println("Initialized at floor", <-positionChan)
-	fstate := idle
+	//Correct so far
+
+	//go-routines
+	go ElevPosition(positionChan)
+	go CheckOrderButton()
+	//LocalChan := make(chan orderQueue, 10)
+
+	
+
+	
 	//fmt.Println("fstate", fstate)
-	queueChan <- local
-	ElevManager(local, fstate, positionChan, LocalChan, queueChan, reset)
+	
+	ElevManager()
 
 }
-func ElevManager(local LocalQueue, fstate State, positionChan chan int, LocalChan chan LocalQueue, queueChan chan LocalQueue, reset chan int) {
 
-	var target int
-	LocalChan <- local
-	for {
-		//<-LocalChan
+func ElevManager(orderButtonChan chan orderQueue, queueChan chan orderQueue ) {
 
-		//fmt.Println("hei")
+	elevState:= idle
+	var queue orderQueue
+	runElevator := make(chan int)
+	runElevator <- 1
 
-		select {
-		case temp := <-queueChan:
-			local = temp
+	for{
 
-		case <-LocalChan:
-			target = OrderFromLocalQueue(local)
+	select {
+		case  orderButtonPushed := <- orderButtonChan:
+			//if internal order, set light and update elevqueue(internal)
+			if(orderButtonPushed.internal){
+				for i:=0 ; i<N_FLOORS ; i++{
+					if (orderButtonPushed.internal[i] != queue.internal[i]) && (orderButtonPushed.internal[i] ){
+						queue.internal[i]=1
+						driver.ButtonLamp(2,i,1)
+					}
 
-			//fmt.Println(<-queueChan)+
-			fmt.Println("fstate", fstate)
 
-			switch fstate {
-
-			case idle:
-
-				fmt.Println("Target: ", target)
-				if target != -1 {
-					position := <-positionChan
-					dir := Sign(target - position)
-					driver.ElevStart(driver.Elev_dir(dir))
-					fstate = running
-					break
 				}
 
-				break
+			}			
+			//toEventHandler <- orderButtonPushed
 
-			case running:
-				fmt.Println("Running")
-				//target = OrderFromLocalQueue(queueChan)
-				position := <-positionChan
-				if position == target {
-					driver.ElevStart(0)
-					fstate = idle
-					local.up[position] = 0
-					local.down[position] = 0
-					local.internal[position] = 0
-					reset <- 1
-					break
-				}
+		//case neworder <- orderFromromEventHandler
+			//update elevqueue with the new order
+			//
 
-				break
+		case <-runElevator:
+			
 
-			case doorOpen:
-				fstate = idle
-				time.Sleep(time.Second * 1)
-				break
-
-			}
-			LocalChan <- local
-		default:
-			LocalChan <- local
+		case lastFloor := <-positionChan:
+			//new floor reached. 
+			//if new floor in queue 
+			// 	stop
+			//	change state to doorOpne
+			// 	set stoplight
+			//	wait?
+			//
 		}
 	}
 
 }
 
 //if (driver.ButtonPushed(j,i)){
-func CheckOrderButton(queueChan chan LocalQueue, LocalChan chan LocalQueue, reset chan int) {
-	local := <-queueChan
-	prevque := local
+func CheckOrderButton(orderButtonChan chan orderQueue) {
+
+	var prevbuttonsPressed orderQueue
+	var buttonsPressed orderQueue
+
 	for {
 
-		for i := 0; i < N_FLOORS; i++ {
-			for j := 0; j < 3; j++ {
+		for floor := 0; floor < N_FLOORS; floor++ {
+			for button := 0; button < 3; button++ {
 				//sjekker for manglende knapper i endeetasjer
-				if (i == 0 && j == 1) || (i == 3 && j == 0) {
+				if (floor == 0 && button == 1) || (floor == 3 && button == 0) {
 
-				} else {
-					if driver.ButtonPushed(driver.Button_type(j), i) == 1 {
-						switch j {
-						case 1:
-							local.down[i] = 1
-							break
-						case 0:
-							local.up[i] = 1
-							break
-						case 2:
-							local.internal[i] = 1
-							break
-						default:
+				} 
+				else {
+			
+					switch button {
+					case 0:
+						buttonsPressed.up[floor] =  drive.ButtonPushed(button, floor)
+						break
+					case 1:
+						buttonsPressed.down[floor] =  drive.ButtonPushed(button, floor) 
+						break
+					
+					case 2:
+						buttonsPressed.internal[floor] =  drive.ButtonPushed(button, floor)
+
+						break
+					default:
 
 						}
 					}
 				}
-			}
-
 		}
-		select {
-		case <-reset:
-			local = <-LocalChan
-			prevque = local
-		default:
-			if local != prevque {
-				queueChan <- local
-				prevque = local
-			}
+		// Only send new if new button is pushed 
+	if ((prevbuttonsPressed != buttonsPressed) && (buttonsPressed == True)){
+		orderButtonChan <- buttonsPressed
+			
 		}
+	prevbuttonsPressed = buttonsPressed
 	}
 }
+
 
 func ElevPosition(positionChan chan int) {
 	for {
@@ -161,61 +158,46 @@ func ElevPosition(positionChan chan int) {
 
 }
 
-func OrderFromLocalQueue(local LocalQueue) int {
-
-	returnval := -1
-	for i := 0; i < 4; i++ {
-		if (local.up[i] != 0) || (local.internal[i] != 0) || (local.down[i] != 0) {
-			returnval = i
-		}
-	}
-
-	return returnval
-}
-
-func Lights(local LocalQueue) {
+/*
+func Lights(local orderQueue) {
 	for i := 0 ; i < N_FLOORS ; i++ {
 	        if((local.up[i]==1) && (i < N_FLOORS-1){
 	            driver.ButtonLamp(0,i,1)
 
 	        }else if((upQueue[i]==0) && i < N_FLOORS-1){
-	            driver.ButtonLamp(0,i,0);
+	            driver.ButtonLamp(0,i,0)
 	        }
 
 	        if((downQueue[i]==1) && i > 0){
-	            driver.ButtonLamp(1,i,1);
+	            driver.ButtonLamp(1,i,1)
 	        }else if((downQueue[i]==0) && i > 0){
-	            driver.ButtonLamp(1,i,0);
+	            driver.ButtonLamp(1,i,0)
 	        }
 	        if(commandQueue[i] == 1){
-	            elev_set_button_lamp(2,i,1);
-	        }
-	        else if(commandQueue[i] == 0){
-	            elev_set_button_lamp(2,i,0);
+	            elev_set_button_lamp(2,i,1)
+	        }else if(commandQueue[i] == 0){
+	            elev_set_button_lamp(2,i,0)
 	        }
 	    }
 
     switch(previousFloor){
         case 0:
-            elev_set_floor_indicator(0);
+            elev_set_floor_indicator(0)
             break;
         case 1:
-            elev_set_floor_indicator(1);
+            elev_set_floor_indicator(1)
             break;
         case 2:
-            elev_set_floor_indicator(2);
+            elev_set_floor_indicator(2)
             break;
         case 3:
-            elev_set_floor_indicator(3);
+            elev_set_floor_indicator(3)
             break;
         default:
             break;
 
     }
-
-}
-
-}
+}*/
 
 func Sign(val int) int {
 	if val < 0 {
