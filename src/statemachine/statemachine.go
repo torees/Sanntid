@@ -7,6 +7,8 @@ import (
 )
 
 type State int
+type Direction int
+type Command int
 
 const N_FLOORS = 4
 
@@ -14,6 +16,17 @@ const (
 	idle State = iota
 	running
 	doorOpen
+)
+const (
+	stop Command =iota
+	open
+	goUp
+	goDown
+)
+
+const (
+	up_dir Direction = iota
+	down_dir
 )
 
 type orderQueue struct {
@@ -25,7 +38,7 @@ type orderQueue struct {
 func main() {
 	//variables
 	
-	var elevDir int
+	
 
 	fmt.Println("Starting Elevator 3000...")
 	driver.ElevInit()
@@ -57,6 +70,25 @@ func main() {
 	ElevManager()
 
 }
+func elevatorController(commandChan chan Command){
+	command 
+}
+
+
+
+func NextFloor(elevDir Direction,&queue orderQueue,currentFloor int){
+		if elevDir == up_dir{
+			for i:=0 ; i < N_FLOORS ; i++{
+				if( queue.up[i] != 0 || queue.down)
+			}
+
+		}else {
+
+			}																					//	FIX THIS
+		
+	
+}
+
 
 func ElevManager(orderButtonChan chan orderQueue, queueChan chan orderQueue ) {
 
@@ -64,6 +96,7 @@ func ElevManager(orderButtonChan chan orderQueue, queueChan chan orderQueue ) {
 	var queue orderQueue
 	runElevator := make(chan int)
 	runElevator <- 1
+	elevDir := up_dir
 
 	for{
 
@@ -87,23 +120,76 @@ func ElevManager(orderButtonChan chan orderQueue, queueChan chan orderQueue ) {
 			//update elevqueue with the new order
 			//
 
-		case <-runElevator:
-			
-
-		case lastFloor := <-positionChan:
+		case currentFloor := <-positionChan:
 			//new floor reached. 
-			//if new floor in queue 
+			//if new floor in queue
+			target := NextFloor(elevDir,&queue, currentFloor)
+			if stopOnFloor(currentFloor, &queue){
+				doChan <- stop
+
+			}
+			//if currentFloor == target
 			// 	stop
 			//	change state to doorOpne
 			// 	set stoplight
 			//	wait?
-			//
+			//  queue.internal[currentfloor]=0
+			//when door closes, pop this floor out of queue
 		}
 	}
 
 }
+func removeFloorFromQueue(currentFloor int){
+	queue.internal[currentfloor]=0
+	queue.up[currentfloor]=0
+	queue.down[currentfloor]=0
+}
 
-//if (driver.ButtonPushed(j,i)){
+
+func stopOnFloor(currentFloor int, &queue orderQueue) bool{
+	//punkt 1
+	if queue.internal[currentFloor]{
+		removeFloorFromQueue(currentFloor)
+		return true
+	}
+	//punkt 2
+	if elevDir ==up_dir{
+		if queue.up[currentFloor]{
+			removeFloorFromQueue(currentFloor)
+			return true
+		}
+
+	}else{
+		if queue.down[currentFloor]{
+			removeFloorFromQueue(currentFloor)
+			return true
+		}
+	}
+
+	//punkt 3. sjekke motsatte eksterne enn retningen
+	if elevDir ==up_dir{
+		for i:=currentFloor+1 ; i<N_FLOORS ; i++{
+			if queue.up[i] != 1 || queue.internal[i] != 1 || queue.down[i] != 1{
+				removeFloorFromQueue(currentFloor)
+				return true
+			}
+		}
+	}else{
+		for i:=currentFloor-1 ; i==0 ; i--{
+			if queue.up[i] != 1 || queue.internal[i] != 1 || queue.down[i] != 1{
+				removeFloorFromQueue(currentFloor)
+				return true
+			}
+		}
+	}
+	return false
+
+	 
+}
+
+
+
+
 func CheckOrderButton(orderButtonChan chan orderQueue) {
 
 	var prevbuttonsPressed orderQueue
