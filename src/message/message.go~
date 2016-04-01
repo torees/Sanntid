@@ -1,20 +1,23 @@
 package message
 
 import (
+	"fmt"
 	"encoding/json"
 )
 //Message ID
 const(
-	Ping = 1
+	Ping = 0
+	OrderButtonPushed = 1
 	ElevatorStateUpdate = 2
-	NewOrder = 3
+	QueueNewOrder = 3
 )
 
 type UDPMessage struct{
 	MessageId int
-	IP string
-	OrderQueue [12]int// 
-	ElevatorStateUpdate [2]int // [0] = state, [1] = position
+	MessageTargetIP string
+	OrderButton int
+	ElevatorFloor int
+	ElevatorFloorTarget int 
 	Checksum int 
 }
 
@@ -22,12 +25,13 @@ func UDPMessageEncode(Msg UDPMessage)([]byte, error){
 	return json.Marshal(Msg)
 }
 
-func UDPMessageDecode(Msg *UDPMessage, UDParray []byte){
-	json.Unmarshal(UDParray, Msg)
+func UDPMessageDecode(Msg *UDPMessage, UDParray []byte) error{
+	return json.Unmarshal(UDParray, Msg)
 }
 
 func CalculateChecksum(Msg *UDPMessage)int{ // not a very good crc, just for testing 
-	c := Msg.MessageId%7+Msg.OrderQueue[0]%7+Msg.ElevatorStateUpdate[0]%7
+	c := Msg.MessageId%7+Msg.OrderButton%7+Msg.OrderButton%7
+	c += Msg.ElevatorFloor%7
 	return c
 }
 
