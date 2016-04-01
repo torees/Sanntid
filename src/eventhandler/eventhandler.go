@@ -67,15 +67,18 @@ func main(){ //function should be renamed afterwards, this is just for testing
 
 				//add msg.IP to ip list IFNOT there already OR number of elevators = N
 
-			case msg := <- UDPOrderReceivedChan:
-				fmt.Println("order received: ", msg.OrderQueue)
-			case msg := <- UDPElevatorStateUpdateChan:
-				fmt.Println("State update : ", msg.ElevatorStateUpdate)
+			//case msg := <- UDPOrderReceivedChan:
+				//fmt.Println("order received: ", msg.OrderQueue)
+			//case msg := <- UDPElevatorStateUpdateChan:
+				//fmt.Println("State update : ", msg.ElevatorStateUpdate)
 			case <- checkNetworkConChan:
 				//network down, handle 
 
 		}
-		
+		for key,_:= range connectedElevTimers{
+			fmt.Println(key)
+		}
+
 	}
 	
 
