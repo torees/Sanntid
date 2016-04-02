@@ -6,6 +6,7 @@ import(
 	"time"
 	"net"
 	"../message"
+	"../statemachine"
 )
 
 const(
@@ -13,6 +14,17 @@ const(
 	)
 
 const N_ELEVATORS = 3
+
+
+type elevator struct{
+	var queue statemachine.OrderQueue
+	var direction int
+	var currentFloor int 
+	
+
+
+}
+
 
 func main(){ //function should be renamed afterwards, this is just for testing
 	var myIp string
@@ -56,7 +68,6 @@ func main(){ //function should be renamed afterwards, this is just for testing
 			case msg := <-UDPPingReceivedChan:
 				fmt.Println("ping received from: ", msg.IP)
 				_,exists := connectedElevTimers[msg.IP]
-
 				if exists{
 					connectedElevTimers[msg.IP].Reset(time.Second)
 				}else{
@@ -168,7 +179,27 @@ func UDPlisten(conn *net.UDPConn, UDPPingReceivedChan chan message.UDPMessage, U
 
 
 
+func masterThread(flagChan){
+	numberOfelevators := 1
+
+	select{
+	case id:=<-elevatorRemoved:
+		numberOfelevators -= 1
+		// remove elevator object from list via IP-address to lost elevator? 
+	case id:=<- elevatorAdded:
+		numberOfelevators += 1
+		if(numberOfelevators > N_ELEVATORS){
+			//fault tolerance
+			fmt.Println("To many elevators") 
+		}
+		//create new elevator object 
 
 
+	case msg:= <- newOrders:
+		//do something with msg, find out which elevator should take it.
+	case msg:= <- stateUpdates:
+	default
 
+	}
+}
 
