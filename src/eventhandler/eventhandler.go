@@ -51,39 +51,37 @@ func main(){ //function should be renamed afterwards, this is just for testing
 	}
 	fmt.Println("My IP", myIP)
 
-
+	//UDP channels
 	UDPSendMsgChan := make(chan message.UDPMessage,100)
 	UDPPingReceivedChan := make(chan message.UDPMessage,100)
 	UDPOrderReceivedChan := make(chan message.UDPMessage,100)
 	UDPElevatorStateUpdateChan := make(chan message.UDPMessage,100)
 	checkNetworkConChan := make(chan bool)
-	orderFromMasterChan := make(chan message.UDPMessage, 10)
-	orderToMasterChan := make(chan message.UDPMessage, 10)
-	stateUpdateToMasterChan := make(chan message.UDPMessage, 10)
+	restartUDPSendChan := make(chan bool)
+	
+	// Channels to master thread 
+	orderFromMasterThreadChan := make(chan message.UDPMessage, 10)
+	orderToMasterThreadChan := make(chan message.UDPMessage, 10)
+	stateUpdateToMasterThreadChan := make(chan message.UDPMessage, 10)
 	elevatorAddedChan := make(chan string, 10)
 	elevatorRemovedChan := make(chan string, 10)
 
 
-	//listenPingChan := make(chan bool, 1)
-	// sendElevComChan :=make(chan *net.UDPConn, 10)
-	// listenElevComChan := make(chan *net.UDPConn, 10)
-
-	//init sockets for sending ping and messages 
-	UDPSendConn:= network.ClientConnectUDP(UDPPort)
-	//sendElevComConn := network.ClientConnectUDP(sendElevCom)
-
+	//Init sockets for sending ping and messages 
+	//UDPSendConn:= network.ClientConnectUDP(UDPPort)
 	UDPlistenConn := network.ServerConnectUDP(UDPPort)
-	//listenElevComConn := network.ServerConnectUDP(listenElevCom)
-
-	go UDPsend(UDPSendConn, UDPSendMsgChan, myIP)
+	startUDPSend(UDPSendMsgChan, restartUDPSendChan, myIP)
+	// Goroutines 
+	//go UDPsend(UDPSendConn, UDPSendMsgChan, myIP, restartUDPSendChan)
 	go UDPlisten(UDPlistenConn, UDPPingReceivedChan, UDPOrderReceivedChan,UDPElevatorStateUpdateChan)
 	go network.CheckNetworkConnection(checkNetworkConChan)
-	go masterThread(elevatorAddedChan, elevatorRemovedChan, stateUpdateToMasterChan,orderToMasterChan,orderFromMasterChan, myIP)
+	go masterThread(elevatorAddedChan, elevatorRemovedChan, stateUpdateToMasterThreadChan,orderToMasterThreadChan,orderFromMasterThreadChan, myIP)
 	go statemachine.StateMachine()
-	//connectedElevIP := [N_ELEVATORS]string
+
 
 	connectedElevTimers := make(map[string]*time.Timer)
 
+	
 
 	for{
 		select{
@@ -98,19 +96,26 @@ func main(){ //function should be renamed afterwards, this is just for testing
 					fmt.Println("adding new elevator")
 				}
 
-			case order := <- orderFromMasterChan:
+			case order := <- orderFromMasterThreadChan:
 				UDPSendMsgChan <- order	
 
 			case msg := <- UDPOrderReceivedChan:
-				orderToMasterChan <- msg
+				orderToMasterThreadChan <- msg
 				fmt.Println("order received: ", msg.OrderQueue)
 			
 			case msg := <- UDPElevatorStateUpdateChan:
-				stateUpdateToMasterChan <- msg
+				stateUpdateToMasterThreadChan <- msg
 				fmt.Println("State update : ", msg.ElevatorStateUpdate)
 			
-			//case <- checkNetworkConChan:
-				//network down, handle 
+			case network:= <- checkNetworkConChan:
+				if(network){
+					startUDPSend(UDPSendMsgChan, restartUDPSendChan, myIP)
+				}else{
+					restartUDPSendChan<- true
+				}
+				
+				
+				 
 
 		}
 
@@ -123,23 +128,22 @@ func main(){ //function should be renamed afterwards, this is just for testing
 func deleteElevator(connectedElevTimers *map[string]*time.Timer, msg message.UDPMessage, elevatorRemovedChan chan string){
 	elevatorRemovedChan <- msg.FromIP
 	delete(*connectedElevTimers,msg.FromIP)
+	fmt.Println("deleting elevator :", msg.FromIP)
 }
 
 
+func startUDPSend(UDPSendMsgChan chan message.UDPMessage, restartUDPSendChan chan bool, myIP string){
+	UDPSendConn := network.ClientConnectUDP(UDPPort)
+	go UDPsend(UDPSendConn, UDPSendMsgChan, myIP, restartUDPSendChan)
+}
 
-func UDPsend(conn *net.UDPConn, UDPMsgChan chan message.UDPMessage, IP string){
+func UDPsend(conn *net.UDPConn, UDPMsgChan chan message.UDPMessage, IP string, restartUDPSendChan chan bool){
 	defer conn.Close()
 	var ping message.UDPMessage
-	
-
 	ping.FromIP = IP
 	ping.MessageId = message.Ping
 	encodedPing,_ :=message.UDPMessageEncode(ping)
 	ticker := time.NewTicker(time.Millisecond*250).C
-
-
-
-	defer conn.Close()
 	for{
 		select{
 			case <- ticker:
@@ -148,7 +152,8 @@ func UDPsend(conn *net.UDPConn, UDPMsgChan chan message.UDPMessage, IP string){
 			case msg := <-UDPMsgChan:
 				encodedMsg,_:= message.UDPMessageEncode(msg)
 				network.ClientSend(conn, encodedMsg)
-			
+			case <- restartUDPSendChan:
+				return 
 		}
 	}
 
@@ -195,21 +200,25 @@ func masterThread(elevatorAddedChan chan string, elevatorRemovedChan chan string
 	var elev elevator
 	for{
 		select{
-			case id:=<-elevatorRemovedChan:
-				
+			case elevatorIP:=<-elevatorRemovedChan:
 				IPlist = IPlist[:0]
 				numberOfelevators -= 1
-				delete(connectedElev,id)
-				for key,_ := range connectedElev{
-					IPlist = append(IPlist,key)
+				delete(connectedElev,elevatorIP)
+				if(numberOfelevators != 0){
+					for key,_ := range connectedElev{
+						IPlist = append(IPlist,key)
+					}
+					sort.Strings(IPlist)
+					if(IPlist[0] == myIP){
+						master = true
+					}else{
+						master = false
 				}
-				sort.Strings(IPlist)
-				if(IPlist[0] == myIP){
-					master = true
-				}else{
-					master = false
 				}
+				fmt.Println(IPlist)
+				master = true
 
+				
 
 				// remove elevator object from list via IP-address to lost elevator? 
 			case id:=<- elevatorAddedChan:
@@ -231,6 +240,7 @@ func masterThread(elevatorAddedChan chan string, elevatorRemovedChan chan string
 				}else{
 					master = false
 				}
+				fmt.Println(IPlist)
 
 				
 				

@@ -58,11 +58,19 @@ func ServerListenUDP(conn *net.UDPConn,buf []byte)int{
 }
 
 func CheckNetworkConnection(networkAccessChannel chan bool){	
+	network := true
 	for{
 		ip := GetNetworkIP()
-		if(ip == "::1"){
-			networkAccessChannel<-false			
+		if(ip == "::1" && network == true){
+			network = false	
+			networkAccessChannel<-false
+			
 		}
+		if(ip != "::1") && !network{
+			network = true 
+			networkAccessChannel<- true
+		}
+
 	}
 }
 
