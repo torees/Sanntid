@@ -7,6 +7,7 @@ import(
 	"net"
 	"../message"
 	"../statemachine"
+	"sort"
 )
 
 const(
@@ -14,28 +15,41 @@ const(
 	)
 
 const N_ELEVATORS = 3
+const N_FLOORS = 4
 
 
 type elevator struct{
-	var queue statemachine.OrderQueue
-	var direction int
-	var currentFloor int 
-	
-
-
+	queue statemachine.OrderQueue
+	direction int
+	currentFloor int 
+	IP string 
+}
+func (elev elevator)cost(order OrderQueue)(float64, string){
+	// do cost calculation on order
+	//return cost value and IP 
+	cost := 0.000
+	return cost, elev.IP
 }
 
 
+type OrderQueue struct {
+	internal []int
+	down     []int
+	up       []int
+}
+
+
+
 func main(){ //function should be renamed afterwards, this is just for testing
-	var myIp string
+	var myIP string
 	for{
-		 myIp = network.GetNetworkIP()
-		if(!(myIp == "::1")){
+		 myIP = network.GetNetworkIP()
+		if(!(myIP == "::1")){
 			break
 		}
 		fmt.Println("No network connection")
 	}
-	fmt.Println("My IP", myIp)
+	fmt.Println("My IP", myIP)
 
 
 	UDPSendMsgChan := make(chan message.UDPMessage,100)
@@ -43,6 +57,12 @@ func main(){ //function should be renamed afterwards, this is just for testing
 	UDPOrderReceivedChan := make(chan message.UDPMessage,100)
 	UDPElevatorStateUpdateChan := make(chan message.UDPMessage,100)
 	checkNetworkConChan := make(chan bool)
+	orderFromMasterChan := make(chan message.UDPMessage, 10)
+	orderToMasterChan := make(chan message.UDPMessage, 10)
+	stateUpdateToMasterChan := make(chan message.UDPMessage, 10)
+	elevatorAddedChan := make(chan string, 10)
+	elevatorRemovedChan := make(chan string, 10)
+
 
 	//listenPingChan := make(chan bool, 1)
 	// sendElevComChan :=make(chan *net.UDPConn, 10)
@@ -55,9 +75,11 @@ func main(){ //function should be renamed afterwards, this is just for testing
 	UDPlistenConn := network.ServerConnectUDP(UDPPort)
 	//listenElevComConn := network.ServerConnectUDP(listenElevCom)
 
-	go UDPsend(UDPSendConn, UDPSendMsgChan, myIp)
+	go UDPsend(UDPSendConn, UDPSendMsgChan, myIP)
 	go UDPlisten(UDPlistenConn, UDPPingReceivedChan, UDPOrderReceivedChan,UDPElevatorStateUpdateChan)
 	go network.CheckNetworkConnection(checkNetworkConChan)
+	go masterThread(elevatorAddedChan, elevatorRemovedChan, stateUpdateToMasterChan,orderToMasterChan,orderFromMasterChan, myIP)
+	go statemachine.StateMachine()
 	//connectedElevIP := [N_ELEVATORS]string
 
 	connectedElevTimers := make(map[string]*time.Timer)
@@ -66,28 +88,30 @@ func main(){ //function should be renamed afterwards, this is just for testing
 	for{
 		select{
 			case msg := <-UDPPingReceivedChan:
-				fmt.Println("ping received from: ", msg.IP)
-				_,exists := connectedElevTimers[msg.IP]
+				_,exists := connectedElevTimers[msg.FromIP]
 				if exists{
-					connectedElevTimers[msg.IP].Reset(time.Second)
+					connectedElevTimers[msg.FromIP].Reset(time.Second)
+
 				}else{
-					connectedElevTimers[msg.IP] = time.AfterFunc(time.Second, func(){ delete(connectedElevTimers,msg.IP) } )
+					elevatorAddedChan <- msg.FromIP
+					connectedElevTimers[msg.FromIP] = time.AfterFunc(time.Second, func(){ deleteElevator(&connectedElevTimers,msg, elevatorRemovedChan)} )
+					fmt.Println("adding new elevator")
 				}
 
+			case order := <- orderFromMasterChan:
+				UDPSendMsgChan <- order	
 
-
-				//add msg.IP to ip list IFNOT there already OR number of elevators = N
-
-			//case msg := <- UDPOrderReceivedChan:
-				//fmt.Println("order received: ", msg.OrderQueue)
-			//case msg := <- UDPElevatorStateUpdateChan:
-				//fmt.Println("State update : ", msg.ElevatorStateUpdate)
-			case <- checkNetworkConChan:
+			case msg := <- UDPOrderReceivedChan:
+				orderToMasterChan <- msg
+				fmt.Println("order received: ", msg.OrderQueue)
+			
+			case msg := <- UDPElevatorStateUpdateChan:
+				stateUpdateToMasterChan <- msg
+				fmt.Println("State update : ", msg.ElevatorStateUpdate)
+			
+			//case <- checkNetworkConChan:
 				//network down, handle 
 
-		}
-		for key,_:= range connectedElevTimers{
-			fmt.Println(key)
 		}
 
 	}
@@ -96,7 +120,10 @@ func main(){ //function should be renamed afterwards, this is just for testing
 }
 
 
-
+func deleteElevator(connectedElevTimers *map[string]*time.Timer, msg message.UDPMessage, elevatorRemovedChan chan string){
+	elevatorRemovedChan <- msg.FromIP
+	delete(*connectedElevTimers,msg.FromIP)
+}
 
 
 
@@ -104,21 +131,8 @@ func UDPsend(conn *net.UDPConn, UDPMsgChan chan message.UDPMessage, IP string){
 	defer conn.Close()
 	var ping message.UDPMessage
 	
-	
-//msg created for testing purposes --------------------
-	var msg message.UDPMessage
-	msg.IP = IP
-	msg.MessageId = message.NewOrder
-	msg.OrderQueue = [12]int{1,0,0,0,0,0,0,0,0,0,0,0}
-	ticker2 := time.NewTicker(time.Millisecond*2500).C
-	var msg2 message.UDPMessage
-	msg2.IP = IP
-	msg2.MessageId = message.ElevatorStateUpdate
-	msg.ElevatorStateUpdate = [2]int{1,0}
-	ticker3 := time.NewTicker(time.Millisecond*3500).C
-//----------------------------
 
-	ping.IP = IP
+	ping.FromIP = IP
 	ping.MessageId = message.Ping
 	encodedPing,_ :=message.UDPMessageEncode(ping)
 	ticker := time.NewTicker(time.Millisecond*250).C
@@ -135,12 +149,6 @@ func UDPsend(conn *net.UDPConn, UDPMsgChan chan message.UDPMessage, IP string){
 				encodedMsg,_:= message.UDPMessageEncode(msg)
 				network.ClientSend(conn, encodedMsg)
 			
-			// testing --------------------------	
-			case <- ticker2:
-				UDPMsgChan <- msg
-			case <- ticker3:
-				UDPMsgChan <- msg2		
-			//-------------------------------------	
 		}
 	}
 
@@ -152,9 +160,9 @@ func UDPlisten(conn *net.UDPConn, UDPPingReceivedChan chan message.UDPMessage, U
 	buf := make([]byte,1024)
 	for{
 		
-		n := network.ServerListenUDP(conn, buf)
-		b := buf[0:n]
-		message.UDPMessageDecode(&msg,b)
+		numOfBytes := network.ServerListenUDP(conn, buf)
+		msgBuffer := buf[0:numOfBytes]
+		message.UDPMessageDecode(&msg,msgBuffer)
 
 		switch msg.MessageId{
 			case message.Ping:
@@ -179,27 +187,81 @@ func UDPlisten(conn *net.UDPConn, UDPPingReceivedChan chan message.UDPMessage, U
 
 
 
-func masterThread(flagChan){
-	numberOfelevators := 1
+func masterThread(elevatorAddedChan chan string, elevatorRemovedChan chan string, stateUpdateToMasterChan chan message.UDPMessage, orderToMasterChan chan message.UDPMessage,orderFromMasterChan chan message.UDPMessage, myIP string){
+	numberOfelevators := 0
+	connectedElev := make(map[string]elevator)
+	master:= true
+	var IPlist []string
+	var elev elevator
+	for{
+		select{
+			case id:=<-elevatorRemovedChan:
+				
+				IPlist = IPlist[:0]
+				numberOfelevators -= 1
+				delete(connectedElev,id)
+				for key,_ := range connectedElev{
+					IPlist = append(IPlist,key)
+				}
+				sort.Strings(IPlist)
+				if(IPlist[0] == myIP){
+					master = true
+				}else{
+					master = false
+				}
 
-	select{
-	case id:=<-elevatorRemoved:
-		numberOfelevators -= 1
-		// remove elevator object from list via IP-address to lost elevator? 
-	case id:=<- elevatorAdded:
-		numberOfelevators += 1
-		if(numberOfelevators > N_ELEVATORS){
-			//fault tolerance
-			fmt.Println("To many elevators") 
-		}
-		//create new elevator object 
+
+				// remove elevator object from list via IP-address to lost elevator? 
+			case id:=<- elevatorAddedChan:
+				numberOfelevators += 1
+				if(numberOfelevators > N_ELEVATORS){
+					//fault tolerance
+					fmt.Println("To many elevators") 
+				}
+				
+				elev.IP = id
+				connectedElev[id] = elev
+				IPlist = IPlist[:0]
+				for key,_ := range connectedElev{
+					IPlist = append(IPlist,key)
+				}
+				sort.Strings(IPlist)
+				if(IPlist[0] == myIP){
+					master = true
+				}else{
+					master = false
+				}
+
+				
+				
+				//create new elevator object 
 
 
-	case msg:= <- newOrders:
-		//do something with msg, find out which elevator should take it.
-	case msg:= <- stateUpdates:
-	default
+			case msg:= <- orderToMasterChan:
+				var IP string
+				var orderCost float64
+				if(master){
+					var newOrder OrderQueue
+					newOrder.up = msg.OrderQueue[4:7]
+					newOrder.down = msg.OrderQueue[8:11]
+					for _,elev := range connectedElev{
+						tempOrderCost,tempIP := elev.cost(newOrder)
+						if(tempOrderCost < orderCost){
+							orderCost = tempOrderCost
+							IP = tempIP
+						}
+					}
+					msg.ToIP = IP
+					orderFromMasterChan <- msg
+					//do something with msg, find out which elevator should take it.
+				}
+			case msg:= <- stateUpdateToMasterChan:
+				elev.direction = msg.ElevatorStateUpdate[0]
+				elev.currentFloor = msg.ElevatorStateUpdate[1]
+				connectedElev[msg.FromIP] = elev
 
+			}
 	}
+
 }
 

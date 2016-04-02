@@ -1,4 +1,4 @@
-package main
+package statemachine
 
 import (
 	"../driver"
@@ -31,7 +31,7 @@ type OrderQueue struct {
 	up       [N_FLOORS]int
 }
 
-func main() {
+func StateMachine() {
 	//variables
 
 	fmt.Println("Starting Elevator 3000...")
@@ -69,7 +69,6 @@ func elevatorController(commandChan chan Command) {
 	for {
 		select {
 		case command := <-commandChan:
-			fmt.Println(command)
 			switch command {
 			case stop:
 				driver.ElevStart(0)
@@ -137,16 +136,13 @@ func nextDirection(elevDir *Direction, queue *OrderQueue, currentFloor int) Comm
 func ElevManager(orderButtonChan chan OrderQueue, queueChan chan OrderQueue, positionChan chan int) {
 
 	var queue OrderQueue
-	fmt.Println(queue)
 	commandChan := make(chan Command, 100)
 	go elevatorController(commandChan)
 	elevDir := up_dir
-
+	
 	for {
-
 		select {
 		case orderButtonPushed := <-orderButtonChan:
-			fmt.Println("buttons pressed")
 			//if internal order, set light and update elevqueue(internal)
 			//if(orderButtonPushed.internal){
 			for i := 0; i < N_FLOORS; i++ {
@@ -189,8 +185,6 @@ func ElevManager(orderButtonChan chan OrderQueue, queueChan chan OrderQueue, pos
 			}
 
 		}
-		fmt.Println(queue)
-		time.Sleep(time.Second)
 	}
 
 }

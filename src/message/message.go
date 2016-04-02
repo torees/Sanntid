@@ -8,13 +8,15 @@ const(
 	Ping = 1
 	ElevatorStateUpdate = 2
 	NewOrder = 3
+	NewOrderFromMaster = 4
 )
 
 type UDPMessage struct{
 	MessageId int
-	IP string
+	FromIP string
+	ToIP string 
 	OrderQueue [12]int// 
-	ElevatorStateUpdate [2]int // [0] = state, [1] = position
+	ElevatorStateUpdate [2]int // [0] = direction, [1] = position
 	Checksum int 
 }
 
