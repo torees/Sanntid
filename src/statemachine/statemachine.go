@@ -25,7 +25,7 @@ const (
 	down_dir
 )
 
-type orderQueue struct {
+type OrderQueue struct {
 	internal [N_FLOORS]int
 	down     [N_FLOORS]int
 	up       [N_FLOORS]int
@@ -40,13 +40,13 @@ func main() {
 	//channels
 	positionChan := make(chan int)
 
-	queueChan := make(chan orderQueue)
-	orderButtonChan := make(chan orderQueue)
+	queueChan := make(chan OrderQueue)
+	orderButtonChan := make(chan OrderQueue)
 
 	//go-routines
 	go ElevPosition(positionChan)
 	go CheckOrderButton(orderButtonChan)
-	//LocalChan := make(chan orderQueue, 10)
+	//LocalChan := make(chan OrderQueue, 10)
 
 	driver.ElevStart(1)
 	<-positionChan
@@ -64,9 +64,12 @@ func elevatorController(commandChan chan Command) {
 	doorTimeoutChan := make(chan bool)
 	doorTimer := time.AfterFunc(time.Second*3, func() { doorTimeoutChan <- true })
 
+	//legge inn fault tolerance ved manuell flytting av heis? Timer på ny command, restart ved timeout
+
 	for {
 		select {
 		case command := <-commandChan:
+			fmt.Println(command)
 			switch command {
 			case stop:
 				driver.ElevStart(0)
@@ -91,14 +94,13 @@ func elevatorController(commandChan chan Command) {
 				//fault tolerance?
 			}
 		case <-doorTimeoutChan:
-			fmt.Println("timeout close door")
 			driver.DoorOpen(0)
 			doorOpen = false
 		}
 	}
 }
 
-func nextDirection(elevDir *Direction, queue *orderQueue, currentFloor int) Command {
+func nextDirection(elevDir *Direction, queue *OrderQueue, currentFloor int) Command {
 	if *elevDir == up_dir {
 		for i := currentFloor + 1; i < N_FLOORS; i++ {
 			if (queue.up[i] != 0) || (queue.internal[i] != 0) || (queue.down[i] != 0) {
@@ -132,9 +134,10 @@ func nextDirection(elevDir *Direction, queue *orderQueue, currentFloor int) Comm
 
 }
 
-func ElevManager(orderButtonChan chan orderQueue, queueChan chan orderQueue, positionChan chan int) {
+func ElevManager(orderButtonChan chan OrderQueue, queueChan chan OrderQueue, positionChan chan int) {
 
-	var queue orderQueue
+	var queue OrderQueue
+	fmt.Println(queue)
 	commandChan := make(chan Command, 100)
 	go elevatorController(commandChan)
 	elevDir := up_dir
@@ -143,6 +146,7 @@ func ElevManager(orderButtonChan chan orderQueue, queueChan chan orderQueue, pos
 
 		select {
 		case orderButtonPushed := <-orderButtonChan:
+			fmt.Println("buttons pressed")
 			//if internal order, set light and update elevqueue(internal)
 			//if(orderButtonPushed.internal){
 			for i := 0; i < N_FLOORS; i++ {
@@ -185,10 +189,12 @@ func ElevManager(orderButtonChan chan orderQueue, queueChan chan orderQueue, pos
 			}
 
 		}
+		fmt.Println(queue)
+		time.Sleep(time.Second)
 	}
 
 }
-func removeFloorFromQueue(currentFloor int, queue *orderQueue) {
+func removeFloorFromQueue(currentFloor int, queue *OrderQueue) {
 	queue.internal[currentFloor] = 0
 	queue.up[currentFloor] = 0
 	queue.down[currentFloor] = 0
@@ -197,7 +203,7 @@ func removeFloorFromQueue(currentFloor int, queue *orderQueue) {
 	driver.ButtonLamp(2, currentFloor, 0)
 }
 
-func stopOnFloor(elevDir Direction, currentFloor int, queue *orderQueue) bool {
+func stopOnFloor(elevDir Direction, currentFloor int, queue *OrderQueue) bool {
 	//catch conercases in upper and lower floor
 	if currentFloor == TOP_FLOOR && queue.down[currentFloor] == 1 || currentFloor == BOTTOM_FLOOR && queue.up[currentFloor] == 1 {
 		removeFloorFromQueue(currentFloor, queue)
@@ -243,10 +249,10 @@ func stopOnFloor(elevDir Direction, currentFloor int, queue *orderQueue) bool {
 
 }
 
-func CheckOrderButton(orderButtonChan chan orderQueue) {
+func CheckOrderButton(orderButtonChan chan OrderQueue) {
 
-	var prevbuttonsPressed orderQueue
-	var buttonsPressed orderQueue
+	var prevbuttonsPressed OrderQueue
+	var buttonsPressed OrderQueue
 
 	for {
 
