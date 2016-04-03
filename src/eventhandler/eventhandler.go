@@ -24,7 +24,7 @@ type elevator struct{
 	currentFloor int 
 	IP string 
 }
-func (elev elevator)cost(order OrderQueue)(float64, string){
+func (elev elevator)cost(order statemachine.OrderQueue)(float64, string){
 	// do cost calculation on order
 	//return cost value and IP 
 	cost := 0.000
@@ -32,11 +32,11 @@ func (elev elevator)cost(order OrderQueue)(float64, string){
 }
 
 
-type OrderQueue struct {
-	internal []int
-	down     []int
-	up       []int
-}
+/*type OrderQueue struct {
+	internal [N_FLOORS]int
+	down     [N_FLOORS]int
+	up       [N_FLOORS]int
+}*/
 
 
 
@@ -54,29 +54,34 @@ func main(){ //function should be renamed afterwards, this is just for testing
 	//UDP channels
 	UDPSendMsgChan := make(chan message.UDPMessage,100)
 	UDPPingReceivedChan := make(chan message.UDPMessage,100)
-	UDPOrderReceivedChan := make(chan message.UDPMessage,100)
-	UDPElevatorStateUpdateChan := make(chan message.UDPMessage,100)
+	UDPMsgReceivedChan := make(chan message.UDPMessage,100)
+
 	checkNetworkConChan := make(chan bool)
 	restartUDPSendChan := make(chan bool)
+
+	//Channels to statemachine
+	NewNetworkOrderToSM := make(chan statemachine.OrderQueue,10)
+	NewNetworkOrderFromSM := make(chan statemachine.OrderQueue,10)
+
+
 	
 	// Channels to master thread 
-	orderFromMasterThreadChan := make(chan message.UDPMessage, 10)
-	orderToMasterThreadChan := make(chan message.UDPMessage, 10)
-	stateUpdateToMasterThreadChan := make(chan message.UDPMessage, 10)
+	NewMsgToMasterChan := make(chan message.UDPMessage, 10)
+	NewOrderFromMasterChan := make(chan message.UDPMessage, 10)
+	
 	elevatorAddedChan := make(chan string, 10)
 	elevatorRemovedChan := make(chan string, 10)
 
 
 	//Init sockets for sending ping and messages 
-	//UDPSendConn:= network.ClientConnectUDP(UDPPort)
 	UDPlistenConn := network.ServerConnectUDP(UDPPort)
 	startUDPSend(UDPSendMsgChan, restartUDPSendChan, myIP)
+	
 	// Goroutines 
-	//go UDPsend(UDPSendConn, UDPSendMsgChan, myIP, restartUDPSendChan)
-	go UDPlisten(UDPlistenConn, UDPPingReceivedChan, UDPOrderReceivedChan,UDPElevatorStateUpdateChan)
+	go UDPlisten(UDPlistenConn, UDPPingReceivedChan, UDPMsgReceivedChan)
 	go network.CheckNetworkConnection(checkNetworkConChan)
-	go masterThread(elevatorAddedChan, elevatorRemovedChan, stateUpdateToMasterThreadChan,orderToMasterThreadChan,orderFromMasterThreadChan, myIP)
-	go statemachine.StateMachine()
+	go masterThread(elevatorAddedChan, elevatorRemovedChan, NewMsgToMasterChan,NewOrderFromMasterChan,myIP)
+	go statemachine.StateMachine(NewNetworkOrderFromSM, NewNetworkOrderToSM)
 
 
 	connectedElevTimers := make(map[string]*time.Timer)
@@ -96,19 +101,43 @@ func main(){ //function should be renamed afterwards, this is just for testing
 					fmt.Println("adding new elevator")
 				}
 
-			case order := <- orderFromMasterThreadChan:
-				UDPSendMsgChan <- order	
+			case msg := <- NewOrderFromMasterChan:
+				fmt.Println("happening?")
+				UDPSendMsgChan <- msg
 
-			case msg := <- UDPOrderReceivedChan:
-				orderToMasterThreadChan <- msg
-				fmt.Println("order received: ", msg.OrderQueue)
-			
-			case msg := <- UDPElevatorStateUpdateChan:
-				stateUpdateToMasterThreadChan <- msg
-				fmt.Println("State update : ", msg.ElevatorStateUpdate)
-			
-			case network:= <- checkNetworkConChan:
-				if(network){
+			case msg := <- UDPMsgReceivedChan:
+				// send udpmessage to correct routine 
+				switch msg.MessageId{
+				case message.ElevatorStateUpdate, message.NewOrder:
+					NewMsgToMasterChan <- msg
+					//fmt.Println("New msg sent to master: ")
+
+				case message.NewOrderFromMaster:
+					var order statemachine.OrderQueue
+					for i:= 0; i<4; i++{
+								order.Up[i] = msg.OrderQueue[(i+4)]
+								order.Down[i] = msg.OrderQueue[(i+8)]
+							}
+					NewNetworkOrderToSM <- order
+				}
+				
+			case order := <- NewNetworkOrderFromSM:
+				//create UDP message and send via UDP 
+				fmt.Println("received new network order from SM")
+				var msg message.UDPMessage
+				msg.MessageId = message.NewOrder
+				msg.FromIP = myIP
+				for i:= 0; i<4; i++{
+					msg.OrderQueue[(i+4)] = order.Up[i]
+					msg.OrderQueue[(i+8)] = order.Down[i] 
+				}
+				//calculate checksum? 
+				fmt.Println("new order sent on network")
+				UDPSendMsgChan <- msg
+
+
+			case haveNetwork:= <- checkNetworkConChan:
+				if(haveNetwork){
 					startUDPSend(UDPSendMsgChan, restartUDPSendChan, myIP)
 				}else{
 					restartUDPSendChan<- true
@@ -137,7 +166,7 @@ func startUDPSend(UDPSendMsgChan chan message.UDPMessage, restartUDPSendChan cha
 	go UDPsend(UDPSendConn, UDPSendMsgChan, myIP, restartUDPSendChan)
 }
 
-func UDPsend(conn *net.UDPConn, UDPMsgChan chan message.UDPMessage, IP string, restartUDPSendChan chan bool){
+func UDPsend(conn *net.UDPConn, UDPSendMsgChan chan message.UDPMessage, IP string, restartUDPSendChan chan bool){
 	defer conn.Close()
 	var ping message.UDPMessage
 	ping.FromIP = IP
@@ -149,7 +178,8 @@ func UDPsend(conn *net.UDPConn, UDPMsgChan chan message.UDPMessage, IP string, r
 			case <- ticker:
 				network.ClientSend(conn, encodedPing)
 
-			case msg := <-UDPMsgChan:
+			case msg := <-UDPSendMsgChan:
+				fmt.Println("new order sent on UDP", msg)
 				encodedMsg,_:= message.UDPMessageEncode(msg)
 				network.ClientSend(conn, encodedMsg)
 			case <- restartUDPSendChan:
@@ -159,7 +189,7 @@ func UDPsend(conn *net.UDPConn, UDPMsgChan chan message.UDPMessage, IP string, r
 
 }
 
-func UDPlisten(conn *net.UDPConn, UDPPingReceivedChan chan message.UDPMessage, UDPOrderReceivedChan chan message.UDPMessage, UDPElevatorStateUpdateChan chan message.UDPMessage){
+func UDPlisten(conn *net.UDPConn, UDPPingReceivedChan chan message.UDPMessage, UDPMsgReceivedChan chan message.UDPMessage){
 	defer conn.Close()
 	var msg message.UDPMessage
 	buf := make([]byte,1024)
@@ -172,14 +202,13 @@ func UDPlisten(conn *net.UDPConn, UDPPingReceivedChan chan message.UDPMessage, U
 		switch msg.MessageId{
 			case message.Ping:
 				UDPPingReceivedChan <- msg
+				fmt.Println("new ping receievd")
 				break
-			case message.ElevatorStateUpdate:
-				UDPElevatorStateUpdateChan <- msg
+			case message.NewOrderFromMaster, message.NewOrder, message.ElevatorStateUpdate:
+				//fmt.Println("order received" ,msg)
+				UDPMsgReceivedChan <- msg
+				//fmt.Println("new network order received")
 				break
-			case message.NewOrder:
-				UDPOrderReceivedChan <- msg
-				break
-			default:
 				//Fault tolerance, shut down?  
 
 		}
@@ -192,7 +221,7 @@ func UDPlisten(conn *net.UDPConn, UDPPingReceivedChan chan message.UDPMessage, U
 
 
 
-func masterThread(elevatorAddedChan chan string, elevatorRemovedChan chan string, stateUpdateToMasterChan chan message.UDPMessage, orderToMasterChan chan message.UDPMessage,orderFromMasterChan chan message.UDPMessage, myIP string){
+func masterThread(elevatorAddedChan chan string, elevatorRemovedChan chan string,NewMsgToMasterChan chan message.UDPMessage, NewOrderFromMasterChan chan message.UDPMessage, myIP string){
 	numberOfelevators := 0
 	connectedElev := make(map[string]elevator)
 	master:= true
@@ -247,30 +276,40 @@ func masterThread(elevatorAddedChan chan string, elevatorRemovedChan chan string
 				//create new elevator object 
 
 
-			case msg:= <- orderToMasterChan:
-				var IP string
-				var orderCost float64
-				if(master){
-					var newOrder OrderQueue
-					newOrder.up = msg.OrderQueue[4:7]
-					newOrder.down = msg.OrderQueue[8:11]
-					for _,elev := range connectedElev{
-						tempOrderCost,tempIP := elev.cost(newOrder)
-						if(tempOrderCost < orderCost){
-							orderCost = tempOrderCost
-							IP = tempIP
-						}
-					}
-					msg.ToIP = IP
-					orderFromMasterChan <- msg
-					//do something with msg, find out which elevator should take it.
-				}
-			case msg:= <- stateUpdateToMasterChan:
-				elev.direction = msg.ElevatorStateUpdate[0]
-				elev.currentFloor = msg.ElevatorStateUpdate[1]
-				connectedElev[msg.FromIP] = elev
+			case msg:= <- NewMsgToMasterChan:
+				switch msg.MessageId{	
+					case message.NewOrder:	
+						var IP string
+						var orderCost float64
+						var newOrder statemachine.OrderQueue
+						if(master){
+							for i:= 0; i<4; i++{
+								newOrder.Up[i] = msg.OrderQueue[(i+4)]
+								newOrder.Down[i] = msg.OrderQueue[(i+8)]
+							}
+							
 
+							for _,elev := range connectedElev{
+								tempOrderCost,tempIP := elev.cost(newOrder)
+								if(tempOrderCost < orderCost){
+									orderCost = tempOrderCost
+									IP = tempIP
+								}
+							}
+							msg.ToIP = IP
+							msg.MessageId = message.NewOrderFromMaster
+							fmt.Println("happening all the time")
+							NewOrderFromMasterChan <- msg
+							//do something with msg, find out which elevator should take it.
+						}
+						break
+					case message.ElevatorStateUpdate:
+						elev.direction = msg.ElevatorStateUpdate[0]
+						elev.currentFloor = msg.ElevatorStateUpdate[1]
+						connectedElev[msg.FromIP] = elev
+						break
 			}
+		}
 	}
 
 }

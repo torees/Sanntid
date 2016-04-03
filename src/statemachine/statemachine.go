@@ -4,6 +4,7 @@ import (
 	"../driver"
 	"fmt"
 	"time"
+
 )
 
 type Direction int
@@ -26,12 +27,12 @@ const (
 )
 
 type OrderQueue struct {
-	internal [N_FLOORS]int
-	down     [N_FLOORS]int
-	up       [N_FLOORS]int
+	Internal [N_FLOORS]int
+	Down     [N_FLOORS]int
+	Up       [N_FLOORS]int
 }
 
-func StateMachine() {
+func StateMachine(NewNetworkOrderFromSM chan OrderQueue, NewNetworkOrderToSM chan OrderQueue) {
 	//variables
 
 	fmt.Println("Starting Elevator 3000...")
@@ -56,7 +57,7 @@ func StateMachine() {
 
 	//fmt.Println("fstate", fstate)
 
-	ElevManager(orderButtonChan, queueChan, positionChan)
+	ElevManager(orderButtonChan, queueChan, positionChan,NewNetworkOrderFromSM, NewNetworkOrderToSM )
 
 }
 func elevatorController(commandChan chan Command) {
@@ -102,12 +103,12 @@ func elevatorController(commandChan chan Command) {
 func nextDirection(elevDir *Direction, queue *OrderQueue, currentFloor int) Command {
 	if *elevDir == up_dir {
 		for i := currentFloor + 1; i < N_FLOORS; i++ {
-			if (queue.up[i] != 0) || (queue.internal[i] != 0) || (queue.down[i] != 0) {
+			if (queue.Up[i] != 0) || (queue.Internal[i] != 0) || (queue.Down[i] != 0) {
 				return goUp
 			}
 		}
 		for i := currentFloor - 1; i >= BOTTOM_FLOOR; i-- {
-			if queue.up[i] != 0 || queue.internal[i] != 0 || queue.down[i] != 0 {
+			if queue.Up[i] != 0 || queue.Internal[i] != 0 || queue.Down[i] != 0 {
 				*elevDir = down_dir
 				return goDown
 			}
@@ -117,13 +118,13 @@ func nextDirection(elevDir *Direction, queue *OrderQueue, currentFloor int) Comm
 	}
 	if *elevDir == down_dir {
 		for i := currentFloor - 1; i >= BOTTOM_FLOOR; i-- {
-			if queue.up[i] != 0 || queue.internal[i] != 0 || queue.down[i] != 0 {
+			if queue.Up[i] != 0 || queue.Internal[i] != 0 || queue.Down[i] != 0 {
 				return goDown
 			}
 
 		}
 		for i := currentFloor + 1; i < N_FLOORS; i++ {
-			if queue.up[i] != 0 || queue.internal[i] != 0 || queue.down[i] != 0 {
+			if queue.Up[i] != 0 || queue.Internal[i] != 0 || queue.Down[i] != 0 {
 				*elevDir = up_dir
 				return goUp
 			}
@@ -133,31 +134,36 @@ func nextDirection(elevDir *Direction, queue *OrderQueue, currentFloor int) Comm
 
 }
 
-func ElevManager(orderButtonChan chan OrderQueue, queueChan chan OrderQueue, positionChan chan int) {
+func ElevManager(orderButtonChan chan OrderQueue, queueChan chan OrderQueue, positionChan chan int,NewNetworkOrderFromSM chan OrderQueue, NewNetworkOrderToSM chan OrderQueue) {
 
 	var queue OrderQueue
+	var order OrderQueue
 	commandChan := make(chan Command, 100)
 	go elevatorController(commandChan)
 	elevDir := up_dir
-	
 	for {
 		select {
 		case orderButtonPushed := <-orderButtonChan:
 			//if internal order, set light and update elevqueue(internal)
 			//if(orderButtonPushed.internal){
 			for i := 0; i < N_FLOORS; i++ {
-				if (orderButtonPushed.internal[i] != queue.internal[i]) && (orderButtonPushed.internal[i] == 1) {
-					queue.internal[i] = 1
+				if (orderButtonPushed.Internal[i] != queue.Internal[i]) && (orderButtonPushed.Internal[i] == 1) {
+					queue.Internal[i] = 1
 					driver.ButtonLamp(2, i, 1)
 				}
 				//dette erstattes senere av nettverkskommandoer:
-				if (orderButtonPushed.up[i] != queue.up[i]) && (orderButtonPushed.up[i] == 1) {
-					queue.up[i] = 1
-					driver.ButtonLamp(0, i, 1)
+				if (orderButtonPushed.Up[i] != queue.Up[i]) && (orderButtonPushed.Up[i] == 1) {
+					fmt.Println("button pushed")
+					order.Up[i] = 1
+					NewNetworkOrderFromSM <- order
+					order.Up[i] = 0
 				}
-				if (orderButtonPushed.down[i] != queue.down[i]) && (orderButtonPushed.down[i] == 1) {
-					queue.down[i] = 1
-					driver.ButtonLamp(1, i, 1)
+				if (orderButtonPushed.Down[i] != queue.Down[i]) && (orderButtonPushed.Down[i] == 1) {
+					fmt.Println("button pushed")
+					var order OrderQueue
+					order.Down[i] = 1
+					NewNetworkOrderFromSM <- order
+					order.Up[i] = 0
 				}
 
 			}
@@ -165,9 +171,18 @@ func ElevManager(orderButtonChan chan OrderQueue, queueChan chan OrderQueue, pos
 			//}
 			//toEventHandler <- orderButtonPushed
 
-		//case neworder <- orderFromromEventHandler
+		case neworder :=<- NewNetworkOrderToSM:
 		//update elevqueue with the new order
-		//
+			for i:= 0; i< N_FLOORS; i++{
+				if(neworder.Up[i] == 1){
+					queue.Up[i] = 1
+				}
+				if(neworder.Down[i] == 1){
+					queue.Down[i] = 1
+				}
+			}
+			break
+
 
 		case currentFloor := <-positionChan:
 			//new floor reached.
@@ -189,9 +204,9 @@ func ElevManager(orderButtonChan chan OrderQueue, queueChan chan OrderQueue, pos
 
 }
 func removeFloorFromQueue(currentFloor int, queue *OrderQueue) {
-	queue.internal[currentFloor] = 0
-	queue.up[currentFloor] = 0
-	queue.down[currentFloor] = 0
+	queue.Internal[currentFloor] = 0
+	queue.Up[currentFloor] = 0
+	queue.Down[currentFloor] = 0
 	driver.ButtonLamp(0, currentFloor, 0)
 	driver.ButtonLamp(1, currentFloor, 0)
 	driver.ButtonLamp(2, currentFloor, 0)
@@ -199,22 +214,22 @@ func removeFloorFromQueue(currentFloor int, queue *OrderQueue) {
 
 func stopOnFloor(elevDir Direction, currentFloor int, queue *OrderQueue) bool {
 	//catch conercases in upper and lower floor
-	if currentFloor == TOP_FLOOR && queue.down[currentFloor] == 1 || currentFloor == BOTTOM_FLOOR && queue.up[currentFloor] == 1 {
+	if currentFloor == TOP_FLOOR && queue.Down[currentFloor] == 1 || currentFloor == BOTTOM_FLOOR && queue.Up[currentFloor] == 1 {
 		removeFloorFromQueue(currentFloor, queue)
 		return true
 	}
-	if queue.internal[currentFloor] == 1 {
+	if queue.Internal[currentFloor] == 1 {
 		removeFloorFromQueue(currentFloor, queue)
 		return true
 	}
 	if elevDir == up_dir {
-		if queue.up[currentFloor] == 1 {
+		if queue.Up[currentFloor] == 1 {
 			removeFloorFromQueue(currentFloor, queue)
 			return true
 		}
 
 	} else {
-		if queue.down[currentFloor] == 1 {
+		if queue.Down[currentFloor] == 1 {
 			removeFloorFromQueue(currentFloor, queue)
 			return true
 		}
@@ -222,18 +237,18 @@ func stopOnFloor(elevDir Direction, currentFloor int, queue *OrderQueue) bool {
 
 	if elevDir == up_dir {
 		for i := currentFloor + 1; i < N_FLOORS; i++ {
-			if queue.up[i] == 1 || queue.internal[i] == 1 || queue.down[i] == 1 {
+			if queue.Up[i] == 1 || queue.Internal[i] == 1 || queue.Down[i] == 1 {
 				return false
-			} else if queue.down[currentFloor] == 1 {
+			} else if queue.Down[currentFloor] == 1 {
 				removeFloorFromQueue(currentFloor, queue)
 				return true
 			}
 		}
 	} else {
 		for i := currentFloor - 1; i == BOTTOM_FLOOR; i-- {
-			if queue.up[i] == 1 || queue.internal[i] == 1 || queue.down[i] == 1 {
+			if queue.Up[i] == 1 || queue.Internal[i] == 1 || queue.Down[i] == 1 {
 				return false
-			} else if queue.up[currentFloor] == 1 {
+			} else if queue.Up[currentFloor] == 1 {
 				removeFloorFromQueue(currentFloor, queue)
 				return true
 			}
@@ -259,14 +274,14 @@ func CheckOrderButton(orderButtonChan chan OrderQueue) {
 
 					switch button {
 					case 0:
-						buttonsPressed.up[floor] = driver.ButtonPushed(driver.Button_type(button), floor)
+						buttonsPressed.Up[floor] = driver.ButtonPushed(driver.Button_type(button), floor)
 						break
 					case 1:
-						buttonsPressed.down[floor] = driver.ButtonPushed(driver.Button_type(button), floor)
+						buttonsPressed.Down[floor] = driver.ButtonPushed(driver.Button_type(button), floor)
 						break
 
 					case 2:
-						buttonsPressed.internal[floor] = driver.ButtonPushed(driver.Button_type(button), floor)
+						buttonsPressed.Internal[floor] = driver.ButtonPushed(driver.Button_type(button), floor)
 
 						break
 					default:
@@ -295,3 +310,5 @@ func ElevPosition(positionChan chan int) {
 	}
 
 }
+
+
