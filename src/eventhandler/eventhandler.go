@@ -94,6 +94,7 @@ func main() { //function should be renamed afterwards, this is just for testing
 			// send udpmessage to correct routine
 			switch msg.MessageId {
 			case message.ElevatorStateUpdate, message.NewOrder:
+				fmt.Println("something to master")
 				NewMsgToMasterChan <- msg
 				//fmt.Println("New msg sent to master: ")
 
@@ -278,7 +279,7 @@ func masterThread(elevatorAddedChan chan string, elevatorRemovedChan chan string
 						msg.ToIP = IP
 					}
 					msg.MessageId = message.NewOrderFromMaster
-					fmt.Println("happening all the time")
+					fmt.Print("happening all the time")
 					NewOrderFromMasterChan <- msg
 					//do something with msg, find out which elevator should take it.
 				}
@@ -287,7 +288,7 @@ func masterThread(elevatorAddedChan chan string, elevatorRemovedChan chan string
 				elev.direction = msg.ElevatorStateUpdate[0]
 				elev.currentFloor = msg.ElevatorStateUpdate[1]
 				connectedElev[msg.FromIP] = elev
-
+				fmt.Println(connectedElev)
 				break
 			}
 		}

@@ -186,6 +186,9 @@ func ElevManager(orderButtonChan chan OrderQueue, queueChan chan OrderQueue, pos
 			if stopOnFloor(elevDir, currentFloor, &queue) == true {
 				commandChan <- stop
 				commandChan <- openDoor
+				stateUpdate[0] = int(elevDir)
+				stateUpdate[1] = currentFloor
+				stateUpdateFromSM <- stateUpdate
 
 			}
 			nextDir := nextDirection(&elevDir, &queue, currentFloor)
@@ -193,9 +196,6 @@ func ElevManager(orderButtonChan chan OrderQueue, queueChan chan OrderQueue, pos
 			if nextDir != stop {
 				commandChan <- nextDir
 			}
-			stateUpdate[0] = int(elevDir)
-			stateUpdate[1] = currentFloor
-			stateUpdateFromSM <- stateUpdate
 
 		}
 	}
