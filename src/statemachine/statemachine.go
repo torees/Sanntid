@@ -4,7 +4,6 @@ import (
 	"../driver"
 	"fmt"
 	"time"
-
 )
 
 type Direction int
@@ -32,7 +31,7 @@ type OrderQueue struct {
 	Up       [N_FLOORS]int
 }
 
-func StateMachine(NewNetworkOrderFromSM chan OrderQueue, NewNetworkOrderToSM chan OrderQueue) {
+func StateMachine(NewNetworkOrderFromSM chan OrderQueue, NewNetworkOrderToSM chan OrderQueue, stateUpdateFromSM chan [2]int) {
 	//variables
 
 	fmt.Println("Starting Elevator 3000...")
@@ -57,7 +56,7 @@ func StateMachine(NewNetworkOrderFromSM chan OrderQueue, NewNetworkOrderToSM cha
 
 	//fmt.Println("fstate", fstate)
 
-	ElevManager(orderButtonChan, queueChan, positionChan,NewNetworkOrderFromSM, NewNetworkOrderToSM )
+	ElevManager(orderButtonChan, queueChan, positionChan, NewNetworkOrderFromSM, NewNetworkOrderToSM, stateUpdateFromSM)
 
 }
 func elevatorController(commandChan chan Command) {
@@ -134,14 +133,16 @@ func nextDirection(elevDir *Direction, queue *OrderQueue, currentFloor int) Comm
 
 }
 
-func ElevManager(orderButtonChan chan OrderQueue, queueChan chan OrderQueue, positionChan chan int,NewNetworkOrderFromSM chan OrderQueue, NewNetworkOrderToSM chan OrderQueue) {
+func ElevManager(orderButtonChan chan OrderQueue, queueChan chan OrderQueue, positionChan chan int, NewNetworkOrderFromSM chan OrderQueue, NewNetworkOrderToSM chan OrderQueue, stateUpdateFromSM chan [2]int) {
 
 	var queue OrderQueue
-	var order OrderQueue
+
 	commandChan := make(chan Command, 100)
 	go elevatorController(commandChan)
 	elevDir := up_dir
+	defer driver.ElevStart(0)
 	for {
+		var order OrderQueue
 		select {
 		case orderButtonPushed := <-orderButtonChan:
 			//if internal order, set light and update elevqueue(internal)
@@ -153,40 +154,34 @@ func ElevManager(orderButtonChan chan OrderQueue, queueChan chan OrderQueue, pos
 				}
 				//dette erstattes senere av nettverkskommandoer:
 				if (orderButtonPushed.Up[i] != queue.Up[i]) && (orderButtonPushed.Up[i] == 1) {
-					fmt.Println("button pushed")
 					order.Up[i] = 1
-					NewNetworkOrderFromSM <- order
-					order.Up[i] = 0
 				}
 				if (orderButtonPushed.Down[i] != queue.Down[i]) && (orderButtonPushed.Down[i] == 1) {
-					fmt.Println("button pushed")
-					var order OrderQueue
 					order.Down[i] = 1
-					NewNetworkOrderFromSM <- order
-					order.Up[i] = 0
 				}
 
 			}
 
-			//}
-			//toEventHandler <- orderButtonPushed
+			NewNetworkOrderFromSM <- order
 
-		case neworder :=<- NewNetworkOrderToSM:
-		//update elevqueue with the new order
-			for i:= 0; i< N_FLOORS; i++{
-				if(neworder.Up[i] == 1){
+		case neworder := <-NewNetworkOrderToSM:
+			//update elevqueue with the new order
+			for i := 0; i < N_FLOORS; i++ {
+				if neworder.Up[i] == 1 {
 					queue.Up[i] = 1
+					driver.ButtonLamp(0, i, 1)
 				}
-				if(neworder.Down[i] == 1){
+				if neworder.Down[i] == 1 {
 					queue.Down[i] = 1
+					driver.ButtonLamp(1, i, 1)
 				}
 			}
 			break
 
-
 		case currentFloor := <-positionChan:
 			//new floor reached.
 			//if new floor in queue
+			var stateUpdate [2]int
 
 			if stopOnFloor(elevDir, currentFloor, &queue) == true {
 				commandChan <- stop
@@ -198,6 +193,9 @@ func ElevManager(orderButtonChan chan OrderQueue, queueChan chan OrderQueue, pos
 			if nextDir != stop {
 				commandChan <- nextDir
 			}
+			stateUpdate[0] = int(elevDir)
+			stateUpdate[1] = currentFloor
+			stateUpdateFromSM <- stateUpdate
 
 		}
 	}
@@ -310,5 +308,3 @@ func ElevPosition(positionChan chan int) {
 	}
 
 }
-
-
