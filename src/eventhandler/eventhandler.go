@@ -102,7 +102,6 @@ func main(){ //function should be renamed afterwards, this is just for testing
 				}
 
 			case msg := <- NewOrderFromMasterChan:
-				fmt.Println("happening?")
 				UDPSendMsgChan <- msg
 
 			case msg := <- UDPMsgReceivedChan:
@@ -113,13 +112,15 @@ func main(){ //function should be renamed afterwards, this is just for testing
 					//fmt.Println("New msg sent to master: ")
 
 				case message.NewOrderFromMaster:
-					var order statemachine.OrderQueue
-					for i:= 0; i<4; i++{
-								order.Up[i] = msg.OrderQueue[(i+4)]
-								order.Down[i] = msg.OrderQueue[(i+8)]
+					if(msg.ToIP == myIP){
+						var order statemachine.OrderQueue
+						for i:= 0; i<4; i++{
+									order.Up[i] = msg.OrderQueue[(i+4)]
+									order.Down[i] = msg.OrderQueue[(i+8)]
 							}
-					NewNetworkOrderToSM <- order
+						NewNetworkOrderToSM <- order
 				}
+			}
 				
 			case order := <- NewNetworkOrderFromSM:
 				//create UDP message and send via UDP 
@@ -179,7 +180,6 @@ func UDPsend(conn *net.UDPConn, UDPSendMsgChan chan message.UDPMessage, IP strin
 				network.ClientSend(conn, encodedPing)
 
 			case msg := <-UDPSendMsgChan:
-				fmt.Println("new order sent on UDP", msg)
 				encodedMsg,_:= message.UDPMessageEncode(msg)
 				network.ClientSend(conn, encodedMsg)
 			case <- restartUDPSendChan:
@@ -202,8 +202,6 @@ func UDPlisten(conn *net.UDPConn, UDPPingReceivedChan chan message.UDPMessage, U
 		switch msg.MessageId{
 			case message.Ping:
 				UDPPingReceivedChan <- msg
-				fmt.Println("new ping receievd")
-				break
 			case message.NewOrderFromMaster, message.NewOrder, message.ElevatorStateUpdate:
 				//fmt.Println("order received" ,msg)
 				UDPMsgReceivedChan <- msg
@@ -245,7 +243,9 @@ func masterThread(elevatorAddedChan chan string, elevatorRemovedChan chan string
 				}
 				}
 				fmt.Println(IPlist)
-				master = true
+				if(numberOfelevators == 0){
+					master = true
+				}
 
 				
 
@@ -296,7 +296,11 @@ func masterThread(elevatorAddedChan chan string, elevatorRemovedChan chan string
 									IP = tempIP
 								}
 							}
-							msg.ToIP = IP
+							if(IP == ""){
+								msg.ToIP = myIP
+							}else{
+								msg.ToIP = IP
+							}
 							msg.MessageId = message.NewOrderFromMaster
 							fmt.Println("happening all the time")
 							NewOrderFromMasterChan <- msg
