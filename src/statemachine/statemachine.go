@@ -21,8 +21,8 @@ const (
 )
 
 const (
-	up_dir Direction = iota
-	down_dir
+	up_dir   Direction = 1
+	down_dir           = -1
 )
 
 type OrderQueue struct {
@@ -186,8 +186,7 @@ func ElevManager(orderButtonChan chan OrderQueue, queueChan chan OrderQueue, pos
 			if stopOnFloor(elevDir, currentFloor, &queue) == true {
 				commandChan <- stop
 				commandChan <- openDoor
-				stateUpdate[0] = int(elevDir)
-				stateUpdate[1] = currentFloor
+				stateUpdate[0], stateUpdate[1] = int(elevDir), currentFloor
 				stateUpdateFromSM <- stateUpdate
 
 			}

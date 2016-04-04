@@ -5,6 +5,7 @@ import (
 	"../network"
 	"../statemachine"
 	"fmt"
+	"math"
 	"net"
 	"sort"
 	"time"
@@ -24,11 +25,48 @@ type elevator struct {
 	IP           string
 }
 
-func (elev elevator) cost(order statemachine.OrderQueue) (float64, string) {
+func (elev elevator) cost(order statemachine.OrderQueue) (int, string) {
 	// do cost calculation on order
 	//return cost value and IP
-	cost := 0.000
+	const dirCost = 10
+	const distCost = 5
+	const numOrderCost = 4
+	cost := 0
+
+	distanceCost := (elev.currentFloor - elev.findOrderFloor(order)) * distCost
+	directionCost := 0
+
+	if distanceCost < 0 {
+		directionCost = dirCost
+		distanceCost = int(math.Abs(float64(distanceCost)))
+	}
+
+	cost = elev.numOrdersInQueue()*numOrderCost + distanceCost + directionCost
+	fmt.Println(cost, elev.IP)
+
 	return cost, elev.IP
+}
+
+func (elev elevator) findOrderFloor(order statemachine.OrderQueue) int {
+	for i := 0; i < N_FLOORS; i++ {
+		if order.Up[i] == 1 || order.Down[i] == 1 {
+			return i
+		}
+	}
+	return -1
+}
+
+func (elev elevator) numOrdersInQueue() int {
+	numOrders := 0
+	for i := 0; i < N_FLOORS; i++ {
+		if elev.queue.Up[i] == 1 {
+			numOrders += 1
+		}
+		if elev.queue.Down[i] == 1 {
+			numOrders += 1
+		}
+	}
+	return numOrders
 }
 
 func main() { //function should be renamed afterwards, this is just for testing
@@ -85,6 +123,7 @@ func main() { //function should be renamed afterwards, this is just for testing
 				elevatorAddedChan <- msg.FromIP
 				connectedElevTimers[msg.FromIP] = time.AfterFunc(time.Second, func() { deleteElevator(&connectedElevTimers, msg, elevatorRemovedChan) })
 				fmt.Println("adding new elevator")
+
 			}
 
 		case msg := <-NewOrderFromMasterChan:
@@ -127,6 +166,7 @@ func main() { //function should be renamed afterwards, this is just for testing
 			var msg message.UDPMessage
 			msg.MessageId = message.ElevatorStateUpdate
 			msg.ElevatorStateUpdate = stateUpdate
+			msg.FromIP = myIP
 			//msg.Checksum = CalculateCheckSum(msg)
 			UDPSendMsgChan <- msg
 
@@ -209,6 +249,7 @@ func masterThread(elevatorAddedChan chan string, elevatorRemovedChan chan string
 	var IPlist []string
 	var elev elevator
 	for {
+
 		select {
 		case elevatorIP := <-elevatorRemovedChan:
 			IPlist = IPlist[:0]
@@ -258,37 +299,63 @@ func masterThread(elevatorAddedChan chan string, elevatorRemovedChan chan string
 			switch msg.MessageId {
 			case message.NewOrder:
 				var IP string
-				var orderCost float64
+				var orderCost int
 				var newOrder statemachine.OrderQueue
 				if master {
-					for i := 0; i < 4; i++ {
+					for i := 0; i < N_FLOORS; i++ {
 						newOrder.Up[i] = msg.OrderQueue[(i + 4)]
 						newOrder.Down[i] = msg.OrderQueue[(i + 8)]
 					}
 
 					for _, elev := range connectedElev {
+						fmt.Println(elev)
 						tempOrderCost, tempIP := elev.cost(newOrder)
+
 						if tempOrderCost < orderCost {
 							orderCost = tempOrderCost
 							IP = tempIP
 						}
 					}
+					// this handles single elevator on network
 					if IP == "" {
 						msg.ToIP = myIP
+						IP = myIP
 					} else {
 						msg.ToIP = IP
 					}
+
+					//end of comment
+
+					for i := 0; i < N_FLOORS; i++ {
+						if newOrder.Up[i] == 1 {
+							elev = connectedElev[IP]
+							elev.queue.Up[i] = 1
+							connectedElev[IP] = elev
+						}
+						if newOrder.Down[i] == 1 {
+							elev = connectedElev[IP]
+							elev.queue.Down[i] = 1
+							connectedElev[IP] = elev
+						}
+					}
 					msg.MessageId = message.NewOrderFromMaster
-					fmt.Print("happening all the time")
+					//fmt.Print("happening all the time")
 					NewOrderFromMasterChan <- msg
 					//do something with msg, find out which elevator should take it.
 				}
 				break
 			case message.ElevatorStateUpdate:
+				elev = connectedElev[msg.FromIP]
+				fmt.Println("Previous info on elevator: ", elev)
 				elev.direction = msg.ElevatorStateUpdate[0]
+
 				elev.currentFloor = msg.ElevatorStateUpdate[1]
+				elev.queue.Up[elev.currentFloor] = 0
+				elev.queue.Down[elev.currentFloor] = 0
 				connectedElev[msg.FromIP] = elev
-				fmt.Println(connectedElev)
+				fmt.Println("master knows this of elev: ", elev)
+
+				//fmt.Println(connectedElev)
 				break
 			}
 		}
