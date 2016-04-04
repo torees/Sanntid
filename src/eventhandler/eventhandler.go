@@ -270,7 +270,6 @@ func masterThread(elevatorAddedChan chan string, elevatorRemovedChan chan string
 				master = true
 			}
 
-			// remove elevator object from list via IP-address to lost elevator?
 		case id := <-elevatorAddedChan:
 			numberOfelevators += 1
 			if numberOfelevators > N_ELEVATORS {
@@ -293,8 +292,6 @@ func masterThread(elevatorAddedChan chan string, elevatorRemovedChan chan string
 			}
 			fmt.Println(IPlist)
 
-			//create new elevator object
-
 		case msg := <-NewMsgToMasterChan:
 			switch msg.MessageId {
 			case message.NewOrder:
@@ -313,8 +310,6 @@ func masterThread(elevatorAddedChan chan string, elevatorRemovedChan chan string
 						if tempOrderCost < orderCost {
 							orderCost = tempOrderCost
 							IP = tempIP
-							//fmt.Println("This elevator will handle the order: ", IP)
-
 						}
 
 					}
@@ -342,28 +337,20 @@ func masterThread(elevatorAddedChan chan string, elevatorRemovedChan chan string
 							elev.queue.Down[i] = 1
 							connectedElev[IP] = elev
 						}
-						/*if newOrder.Internal[i] == 1 {
-							elev = connectedElev[IP]
-							elev.queue.Internal[i] = 1
-							connectedElev[IP] = elev
-						}*/ //if master need infor on internal queue
 					}
 					msg.MessageId = message.NewOrderFromMaster
 					NewOrderFromMasterChan <- msg
-					//do something with msg, find out which elevator should take it.
+
 				}
 				break
+
 			case message.ElevatorStateUpdate:
 				elev = connectedElev[msg.FromIP]
-				fmt.Println("Previous info on elevator: ", elev)
 				elev.direction = msg.ElevatorStateUpdate[0]
 				elev.currentFloor = msg.ElevatorStateUpdate[1]
 				elev.queue.Up[elev.currentFloor] = 0
 				elev.queue.Down[elev.currentFloor] = 0
 				connectedElev[msg.FromIP] = elev
-				fmt.Println("master knows this of elev: ", elev)
-
-				//fmt.Println(connectedElev)
 				break
 			}
 		}
