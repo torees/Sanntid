@@ -100,6 +100,12 @@ func elevatorController(commandChan chan Command) {
 }
 
 func nextDirection(elevDir *Direction, queue *OrderQueue, currentFloor int) Command {
+	if currentFloor == 3 {
+		*elevDir = down_dir
+	} else if currentFloor == 0 {
+		*elevDir = up_dir
+	}
+
 	if *elevDir == up_dir {
 		for i := currentFloor + 1; i < N_FLOORS; i++ {
 			if (queue.Up[i] != 0) || (queue.Internal[i] != 0) || (queue.Down[i] != 0) {
@@ -150,6 +156,7 @@ func ElevManager(orderButtonChan chan OrderQueue, queueChan chan OrderQueue, pos
 			for i := 0; i < N_FLOORS; i++ {
 				if (orderButtonPushed.Internal[i] != queue.Internal[i]) && (orderButtonPushed.Internal[i] == 1) {
 					queue.Internal[i] = 1
+					//order.Internal = queue.Internal
 					driver.ButtonLamp(2, i, 1)
 				}
 				//dette erstattes senere av nettverkskommandoer:
@@ -168,6 +175,7 @@ func ElevManager(orderButtonChan chan OrderQueue, queueChan chan OrderQueue, pos
 			//update elevqueue with the new order
 			for i := 0; i < N_FLOORS; i++ {
 				if neworder.Up[i] == 1 {
+					fmt.Println("new order stored locally")
 					queue.Up[i] = 1
 					driver.ButtonLamp(0, i, 1)
 				}
@@ -184,13 +192,14 @@ func ElevManager(orderButtonChan chan OrderQueue, queueChan chan OrderQueue, pos
 			var stateUpdate [2]int
 
 			if stopOnFloor(elevDir, currentFloor, &queue) == true {
+				fmt.Println("STOP")
 				commandChan <- stop
 				commandChan <- openDoor
-				if currentFloor == 3 {
+				/*if currentFloor == 3 {
 					elevDir = down_dir
 				} else if currentFloor == 0 {
 					elevDir = up_dir
-				}
+				}*/
 				stateUpdate[0], stateUpdate[1] = int(elevDir), currentFloor
 				stateUpdateFromSM <- stateUpdate
 
@@ -216,6 +225,7 @@ func removeFloorFromQueue(currentFloor int, queue *OrderQueue) {
 
 func stopOnFloor(elevDir Direction, currentFloor int, queue *OrderQueue) bool {
 	//catch conercases in upper and lower floor
+
 	if currentFloor == TOP_FLOOR && queue.Down[currentFloor] == 1 || currentFloor == BOTTOM_FLOOR && queue.Up[currentFloor] == 1 {
 		removeFloorFromQueue(currentFloor, queue)
 		return true
@@ -247,7 +257,7 @@ func stopOnFloor(elevDir Direction, currentFloor int, queue *OrderQueue) bool {
 			}
 		}
 	} else {
-		for i := currentFloor - 1; i == BOTTOM_FLOOR; i-- {
+		for i := currentFloor - 1; i > BOTTOM_FLOOR-1; i-- {
 			if queue.Up[i] == 1 || queue.Internal[i] == 1 || queue.Down[i] == 1 {
 				return false
 			} else if queue.Up[currentFloor] == 1 {

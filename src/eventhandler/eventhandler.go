@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"math"
 	"net"
+	"os"
 	"sort"
 	"time"
 )
@@ -231,9 +232,7 @@ func UDPlisten(conn *net.UDPConn, UDPPingReceivedChan chan message.UDPMessage, U
 			UDPPingReceivedChan <- msg
 			break
 		case message.NewOrderFromMaster, message.NewOrder, message.ElevatorStateUpdate:
-			//fmt.Println("order received" ,msg)
 			UDPMsgReceivedChan <- msg
-			//fmt.Println("new network order received")
 			break
 			//Fault tolerance, shut down?
 
@@ -277,6 +276,7 @@ func masterThread(elevatorAddedChan chan string, elevatorRemovedChan chan string
 			if numberOfelevators > N_ELEVATORS {
 				//fault tolerance
 				fmt.Println("To many elevators")
+				os.Exit(0)
 			}
 
 			elev.IP = id
@@ -310,11 +310,10 @@ func masterThread(elevatorAddedChan chan string, elevatorRemovedChan chan string
 
 					for _, elev := range connectedElev {
 						tempOrderCost, tempIP := elev.cost(newOrder)
-						fmt.Println(elev)
 						if tempOrderCost < orderCost {
 							orderCost = tempOrderCost
 							IP = tempIP
-							fmt.Println("This elevator will handle the order: ", IP)
+							//fmt.Println("This elevator will handle the order: ", IP)
 
 						}
 
@@ -343,9 +342,13 @@ func masterThread(elevatorAddedChan chan string, elevatorRemovedChan chan string
 							elev.queue.Down[i] = 1
 							connectedElev[IP] = elev
 						}
+						/*if newOrder.Internal[i] == 1 {
+							elev = connectedElev[IP]
+							elev.queue.Internal[i] = 1
+							connectedElev[IP] = elev
+						}*/ //if master need infor on internal queue
 					}
 					msg.MessageId = message.NewOrderFromMaster
-					//fmt.Print("happening all the time")
 					NewOrderFromMasterChan <- msg
 					//do something with msg, find out which elevator should take it.
 				}
