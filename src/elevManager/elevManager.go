@@ -113,13 +113,16 @@ func nextDirection(elevDir *Direction, queue *OrderQueue, currentFloor int) Comm
 
 }
 
-func initializeElevator(positionChan chan int) {
+func initializeElevator(positionChan chan int, stateUpdateFromSM chan [2]int) {
 	driver.HardwareInit()
+	var stateUpdate [2]int
 	fmt.Println("Starting Elevator 3000...")
 	driver.ElevStart(1)
-	<-positionChan
+	initialFloor:=<-positionChan
 	driver.ElevStart(0)
 	fmt.Println("Initialized at floor", <-positionChan+1)
+	stateUpdate[0], stateUpdate[1] = int(up_dir), initialFloor
+	stateUpdateFromSM <- stateUpdate
 
 }
 
@@ -137,7 +140,7 @@ func ElevManager(lightCommandChan chan LightCommand, NewNetworkOrderFromSM chan 
 	go ElevPosition(positionChan)
 	go CheckOrderButton(orderButtonChan)
 
-	initializeElevator(positionChan)
+	initializeElevator(positionChan, stateUpdateFromSM)
 
 	elevDir := up_dir
 
