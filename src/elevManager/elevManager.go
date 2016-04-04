@@ -126,7 +126,7 @@ func initializeElevator(positionChan chan int, stateUpdateFromSM chan [2]int) {
 
 }
 
-func ElevManager(lightCommandChan chan LightCommand, NewNetworkOrderFromSM chan OrderQueue, NewNetworkOrderToSM chan OrderQueue, stateUpdateFromSM chan [2]int) {
+func ElevManager(requestStateUpdateChan chan bool, lightCommandChan chan LightCommand, NewNetworkOrderFromSM chan OrderQueue, NewNetworkOrderToSM chan OrderQueue, stateUpdateFromSM chan [2]int) {
 
 	var queue OrderQueue
 
@@ -143,7 +143,6 @@ func ElevManager(lightCommandChan chan LightCommand, NewNetworkOrderFromSM chan 
 	initializeElevator(positionChan, stateUpdateFromSM)
 
 	elevDir := up_dir
-	//ticker := time.NewTicker(time.Millisecond * 1000).C
 	defer driver.ElevStart(0)
 	var stateUpdate [2]int
 	for {
@@ -202,8 +201,8 @@ func ElevManager(lightCommandChan chan LightCommand, NewNetworkOrderFromSM chan 
 		case light := <-lightCommandChan:
 			driver.ButtonLamp(driver.Button_type(light[0]), light[1], light[2])
 		
-		//case <- ticker:
-		//	stateUpdateFromSM <- stateUpdate			
+		case <- requestStateUpdateChan:
+			stateUpdateFromSM <- stateUpdate			
 
 		}
 

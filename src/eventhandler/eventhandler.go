@@ -99,6 +99,7 @@ func main() { //function should be renamed afterwards, this is just for testing
 	NewNetworkOrderToSM := make(chan elevManager.OrderQueue, 10)
 	NewNetworkOrderFromSM := make(chan elevManager.OrderQueue, 10)
 	stateUpdateFromSM := make(chan [2]int, 10)
+	requestStateUpdateChan := make(chan bool)
 
 	// Channels to master thread
 	NewMsgToMasterChan := make(chan message.UDPMessage, 10)
@@ -115,7 +116,7 @@ func main() { //function should be renamed afterwards, this is just for testing
 	go UDPlisten(UDPlistenConn, UDPPingReceivedChan, UDPMsgReceivedChan)
 	go network.CheckNetworkConnection(checkNetworkConChan)
 	go masterThread(lightCommandChan, elevatorAddedChan, elevatorRemovedChan, NewMsgToMasterChan, NewOrderFromMasterChan, myIP)
-	go elevManager.ElevManager(lightCommandChan, NewNetworkOrderFromSM, NewNetworkOrderToSM, stateUpdateFromSM)
+	go elevManager.ElevManager(requestStateUpdateChan, lightCommandChan, NewNetworkOrderFromSM, NewNetworkOrderToSM, stateUpdateFromSM)
 
 	connectedElevTimers := make(map[string]*time.Timer)
 
@@ -129,7 +130,9 @@ func main() { //function should be renamed afterwards, this is just for testing
 			} else {
 				elevatorAddedChan <- msg.FromIP
 				connectedElevTimers[msg.FromIP] = time.AfterFunc(time.Second, func() { deleteElevator(&connectedElevTimers, msg, elevatorRemovedChan) })
+				requestStateUpdateChan <- true
 				fmt.Println("adding new elevator")
+
 
 			}
 
