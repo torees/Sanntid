@@ -1,7 +1,7 @@
 package main
 
 import (
-	"../driver"
+	."../driver"
 	"../elevManager"
 	"../message"
 	"../network"
@@ -17,8 +17,7 @@ const (
 	UDPPort = ":20011"
 )
 
-const N_ELEVATORS = 3
-const N_FLOORS = 4
+
 const MAX_ORDER_COST = 25
 
 type elevator struct {
@@ -84,7 +83,7 @@ func main() { //function should be renamed afterwards, this is just for testing
 		}
 		fmt.Println("No network connection")
 	}
-	driver.NetworkConnect(0)
+	NetworkConnect(0)
 	fmt.Println("My IP", myIP)
 
 	//UDP channels

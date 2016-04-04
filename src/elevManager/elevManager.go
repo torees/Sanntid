@@ -4,14 +4,13 @@ import (
 	"../driver"
 	"fmt"
 	"time"
+	. "../internalOrders"
 )
 
 type Direction int
 type Command int
 
-const N_FLOORS = 4
-const BOTTOM_FLOOR = 0
-const TOP_FLOOR = 3
+
 
 const (
 	stop Command = iota
@@ -26,9 +25,9 @@ const (
 )
 
 type OrderQueue struct {
-	Internal [N_FLOORS]int
-	Down     [N_FLOORS]int
-	Up       [N_FLOORS]int
+	Internal [driver.N_FLOORS]int
+	Down     [driver.N_FLOORS]int
+	Up       [driver.N_FLOORS]int
 }
 
 type LightCommand [3]int //index: [0]: button [1]: floor [2] lightvalue
@@ -81,12 +80,12 @@ func nextDirection(elevDir *Direction, queue *OrderQueue, currentFloor int) Comm
 	}
 
 	if *elevDir == up_dir {
-		for i := currentFloor + 1; i < N_FLOORS; i++ {
+		for i := currentFloor + 1; i < driver.N_FLOORS; i++ {
 			if (queue.Up[i] != 0) || (queue.Internal[i] != 0) || (queue.Down[i] != 0) {
 				return goUp
 			}
 		}
-		for i := currentFloor - 1; i >= BOTTOM_FLOOR; i-- {
+		for i := currentFloor - 1; i >= driver.BOTTOM_FLOOR; i-- {
 			if queue.Up[i] != 0 || queue.Internal[i] != 0 || queue.Down[i] != 0 {
 				*elevDir = down_dir
 				return goDown
@@ -96,13 +95,13 @@ func nextDirection(elevDir *Direction, queue *OrderQueue, currentFloor int) Comm
 
 	}
 	if *elevDir == down_dir {
-		for i := currentFloor - 1; i >= BOTTOM_FLOOR; i-- {
+		for i := currentFloor - 1; i >= driver.BOTTOM_FLOOR; i-- {
 			if queue.Up[i] != 0 || queue.Internal[i] != 0 || queue.Down[i] != 0 {
 				return goDown
 			}
 
 		}
-		for i := currentFloor + 1; i < N_FLOORS; i++ {
+		for i := currentFloor + 1; i < driver.N_FLOORS; i++ {
 			if queue.Up[i] != 0 || queue.Internal[i] != 0 || queue.Down[i] != 0 {
 				*elevDir = up_dir
 				return goUp
@@ -130,6 +129,7 @@ func ElevManager(requestStateUpdateChan chan bool, lightCommandChan chan LightCo
 
 	var queue OrderQueue
 
+
 	//channels
 	positionChan := make(chan int)
 	commandChan := make(chan Command, 100)
@@ -141,19 +141,22 @@ func ElevManager(requestStateUpdateChan chan bool, lightCommandChan chan LightCo
 	go CheckOrderButton(orderButtonChan)
 
 	initializeElevator(positionChan, stateUpdateFromSM)
-
+	var order OrderQueue
+	//WriteInternals(order.Internal)
+	queue.Internal = ReadInternals()
 	elevDir := up_dir
 	defer driver.ElevStart(0)
 	var stateUpdate [2]int
 	for {
-		var order OrderQueue
+		
 		select {
 		case orderButtonPushed := <-orderButtonChan:
-			for i := 0; i < N_FLOORS; i++ {
+			for i := 0; i < driver.N_FLOORS; i++ {
 				if (orderButtonPushed.Internal[i] != queue.Internal[i]) && (orderButtonPushed.Internal[i] == 1) {
 					queue.Internal[i] = 1
 					order.Internal[i] = 1
 					driver.ButtonLamp(2, i, 1)
+
 					NewNetworkOrderFromSM <- order
 					break
 				}
@@ -169,9 +172,10 @@ func ElevManager(requestStateUpdateChan chan bool, lightCommandChan chan LightCo
 				}
 
 			}
+			WriteInternals(queue.Internal)
 
 		case neworder := <-NewNetworkOrderToSM:
-			for i := 0; i < N_FLOORS; i++ {
+			for i := 0; i < driver.N_FLOORS; i++ {
 				if neworder.Up[i] == 1 {
 					queue.Up[i] = 1
 					driver.ButtonLamp(0, i, 1)
@@ -218,7 +222,7 @@ func removeFloorFromQueue(currentFloor int, queue *OrderQueue) {
 }
 
 func stopOnFloor(elevDir Direction, currentFloor int, queue *OrderQueue) bool {
-	if currentFloor == TOP_FLOOR && queue.Down[currentFloor] == 1 || currentFloor == BOTTOM_FLOOR && queue.Up[currentFloor] == 1 {
+	if currentFloor == driver.TOP_FLOOR && queue.Down[currentFloor] == 1 || currentFloor == driver.BOTTOM_FLOOR && queue.Up[currentFloor] == 1 {
 		removeFloorFromQueue(currentFloor, queue)
 		return true
 	}
@@ -240,7 +244,7 @@ func stopOnFloor(elevDir Direction, currentFloor int, queue *OrderQueue) bool {
 	}
 
 	if elevDir == up_dir {
-		for i := currentFloor + 1; i < N_FLOORS; i++ {
+		for i := currentFloor + 1; i < driver.N_FLOORS; i++ {
 			if queue.Up[i] == 1 || queue.Internal[i] == 1 || queue.Down[i] == 1 {
 				return false
 			} else if queue.Down[currentFloor] == 1 {
@@ -249,7 +253,7 @@ func stopOnFloor(elevDir Direction, currentFloor int, queue *OrderQueue) bool {
 			}
 		}
 	} else {
-		for i := currentFloor - 1; i > BOTTOM_FLOOR-1; i-- {
+		for i := currentFloor - 1; i > driver.BOTTOM_FLOOR-1; i-- {
 			if queue.Up[i] == 1 || queue.Internal[i] == 1 || queue.Down[i] == 1 {
 				return false
 			} else if queue.Up[currentFloor] == 1 {
@@ -269,7 +273,7 @@ func CheckOrderButton(orderButtonChan chan OrderQueue) {
 
 	for {
 
-		for floor := 0; floor < N_FLOORS; floor++ {
+		for floor := 0; floor < driver.N_FLOORS; floor++ {
 			for button := 0; button < 3; button++ {
 				if (floor == 0 && button == 1) || (floor == 3 && button == 0) {
 
@@ -291,7 +295,7 @@ func CheckOrderButton(orderButtonChan chan OrderQueue) {
 			}
 		}
 		var num int
-		for i:= 0; i< N_FLOORS; i++{
+		for i:= 0; i< driver.N_FLOORS; i++{
 			if(buttonsPressed.Up[i] ==1){
 				num +=1}
 			if (buttonsPressed.Down[i] ==1){

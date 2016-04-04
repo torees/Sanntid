@@ -12,6 +12,11 @@ import "C"
 type Elev_dir int
 type Button_type int
 
+const N_FLOORS = 4
+const BOTTOM_FLOOR = 0
+const TOP_FLOOR = 3
+const N_ELEVATORS = 3
+
 const (
 	DOWN Elev_dir = -1
 	STOP Elev_dir = 0
