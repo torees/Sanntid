@@ -360,7 +360,8 @@ func masterThread(lightCommandChan chan elevManager.LightCommand, elevatorAddedC
 						}
 					}
 					msg.MessageId = message.NewOrderFromMaster
-					NewOrderFromMasterChan <- msg
+					fmt.Println("queue Update", elev.queue)
+					NewOrderFromMasterChan <- msg // send ON UDP
 
 				}
 				for i := 0; i < N_FLOORS; i++ {
@@ -372,28 +373,32 @@ func masterThread(lightCommandChan chan elevManager.LightCommand, elevatorAddedC
 				}
 				break
 
-			case message.ElevatorStateUpdate:
-				var light elevManager.LightCommand
-				elev = connectedElev[msg.FromIP]
-				elev.direction = msg.ElevatorStateUpdate[0]
-				elev.currentFloor = msg.ElevatorStateUpdate[1]
 
-				if elev.queue.Up[elev.currentFloor] == 1 {
-					light = [3]int{0, elev.currentFloor, 0}
-					lightCommandChan <- light
-				}
-				if elev.queue.Down[elev.currentFloor] == 1 {
-					light = [3]int{1, elev.currentFloor, 0}
-					lightCommandChan <- light
-				}
+		case message.ElevatorStateUpdate:
+			var light elevManager.LightCommand
+			elev = connectedElev[msg.FromIP]
+			fmt.Println("heis: ", msg.FromIP)
+			elev.direction = msg.ElevatorStateUpdate[0]
+			elev.currentFloor = msg.ElevatorStateUpdate[1]
+			fmt.Println("current floor ", elev.currentFloor)
+			fmt.Println("up queue ", elev.queue.Up)
 
-				elev.queue.Up[elev.currentFloor] = 0
-				elev.queue.Down[elev.currentFloor] = 0
-				elev.queue.Internal[elev.currentFloor] = 0
-				connectedElev[msg.FromIP] = elev
-				break
+			if elev.queue.Up[elev.currentFloor] == 1 {
+				light = [3]int{0, elev.currentFloor, 0}
+				lightCommandChan <- light
 			}
+			if elev.queue.Down[elev.currentFloor] == 1 {
+				light = [3]int{1, elev.currentFloor, 0}
+				lightCommandChan <- light
+			}
+
+			elev.queue.Up[elev.currentFloor] = 0
+			elev.queue.Down[elev.currentFloor] = 0
+			elev.queue.Internal[elev.currentFloor] = 0
+			connectedElev[msg.FromIP] = elev
+			break
 		}
 	}
+}
 
 }

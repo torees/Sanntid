@@ -169,7 +169,6 @@ func ElevManager(lightCommandChan chan LightCommand, NewNetworkOrderFromSM chan 
 			}
 
 		case neworder := <-NewNetworkOrderToSM:
-			fmt.Println("Up order", neworder.Up)
 			for i := 0; i < N_FLOORS; i++ {
 				if neworder.Up[i] == 1 {
 					queue.Up[i] = 1
@@ -210,8 +209,8 @@ func removeFloorFromQueue(currentFloor int, queue *OrderQueue) {
 	queue.Up[currentFloor] = 0
 	queue.Down[currentFloor] = 0
 	driver.ButtonLamp(2, currentFloor, 0)
-	//driver.ButtonLamp(1, currentFloor, 0)
-	//driver.ButtonLamp(2, currentFloor, 0)
+	driver.ButtonLamp(1, currentFloor, 0)
+	driver.ButtonLamp(2, currentFloor, 0)
 }
 
 func stopOnFloor(elevDir Direction, currentFloor int, queue *OrderQueue) bool {
