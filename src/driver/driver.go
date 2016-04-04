@@ -26,7 +26,7 @@ func ElevStart(dir Elev_dir) {
 	C.elev_set_motor_direction(C.elev_motor_direction_t(dir))
 }
 
-func NetworkDisconnect(value int) {
+func NetworkConnect(value int) {
 	C.elev_set_stop_lamp(C.int(value))
 }
 

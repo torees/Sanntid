@@ -46,15 +46,11 @@ func StateMachine(NewNetworkOrderFromSM chan OrderQueue, NewNetworkOrderToSM cha
 	//go-routines
 	go ElevPosition(positionChan)
 	go CheckOrderButton(orderButtonChan)
-	//LocalChan := make(chan OrderQueue, 10)
 
 	driver.ElevStart(1)
 	<-positionChan
 	driver.ElevStart(0)
 	fmt.Println("Initialized at floor", <-positionChan)
-	//Correct so far
-
-	//fmt.Println("fstate", fstate)
 
 	ElevManager(orderButtonChan, queueChan, positionChan, NewNetworkOrderFromSM, NewNetworkOrderToSM, stateUpdateFromSM)
 
@@ -151,15 +147,12 @@ func ElevManager(orderButtonChan chan OrderQueue, queueChan chan OrderQueue, pos
 		var order OrderQueue
 		select {
 		case orderButtonPushed := <-orderButtonChan:
-			//if internal order, set light and update elevqueue(internal)
-			//if(orderButtonPushed.internal){
 			for i := 0; i < N_FLOORS; i++ {
 				if (orderButtonPushed.Internal[i] != queue.Internal[i]) && (orderButtonPushed.Internal[i] == 1) {
 					queue.Internal[i] = 1
-					//order.Internal = queue.Internal
+					order.Internal[i] = 1
 					driver.ButtonLamp(2, i, 1)
 				}
-				//dette erstattes senere av nettverkskommandoer:
 				if (orderButtonPushed.Up[i] != queue.Up[i]) && (orderButtonPushed.Up[i] == 1) {
 					order.Up[i] = 1
 				}
@@ -168,14 +161,11 @@ func ElevManager(orderButtonChan chan OrderQueue, queueChan chan OrderQueue, pos
 				}
 
 			}
-
 			NewNetworkOrderFromSM <- order
 
 		case neworder := <-NewNetworkOrderToSM:
-			//update elevqueue with the new order
 			for i := 0; i < N_FLOORS; i++ {
 				if neworder.Up[i] == 1 {
-					fmt.Println("new order stored locally")
 					queue.Up[i] = 1
 					driver.ButtonLamp(0, i, 1)
 				}
@@ -187,19 +177,11 @@ func ElevManager(orderButtonChan chan OrderQueue, queueChan chan OrderQueue, pos
 			break
 
 		case currentFloor := <-positionChan:
-			//new floor reached.
-			//if new floor in queue
 			var stateUpdate [2]int
 
 			if stopOnFloor(elevDir, currentFloor, &queue) == true {
-				fmt.Println("STOP")
 				commandChan <- stop
 				commandChan <- openDoor
-				/*if currentFloor == 3 {
-					elevDir = down_dir
-				} else if currentFloor == 0 {
-					elevDir = up_dir
-				}*/
 				stateUpdate[0], stateUpdate[1] = int(elevDir), currentFloor
 				stateUpdateFromSM <- stateUpdate
 
@@ -224,8 +206,6 @@ func removeFloorFromQueue(currentFloor int, queue *OrderQueue) {
 }
 
 func stopOnFloor(elevDir Direction, currentFloor int, queue *OrderQueue) bool {
-	//catch conercases in upper and lower floor
-
 	if currentFloor == TOP_FLOOR && queue.Down[currentFloor] == 1 || currentFloor == BOTTOM_FLOOR && queue.Up[currentFloor] == 1 {
 		removeFloorFromQueue(currentFloor, queue)
 		return true
@@ -279,11 +259,9 @@ func CheckOrderButton(orderButtonChan chan OrderQueue) {
 
 		for floor := 0; floor < N_FLOORS; floor++ {
 			for button := 0; button < 3; button++ {
-				//sjekker for manglende knapper i endeetasjer
 				if (floor == 0 && button == 1) || (floor == 3 && button == 0) {
 
 				} else {
-
 					switch button {
 					case 0:
 						buttonsPressed.Up[floor] = driver.ButtonPushed(driver.Button_type(button), floor)
@@ -291,10 +269,8 @@ func CheckOrderButton(orderButtonChan chan OrderQueue) {
 					case 1:
 						buttonsPressed.Down[floor] = driver.ButtonPushed(driver.Button_type(button), floor)
 						break
-
 					case 2:
 						buttonsPressed.Internal[floor] = driver.ButtonPushed(driver.Button_type(button), floor)
-
 						break
 					default:
 
@@ -302,10 +278,8 @@ func CheckOrderButton(orderButtonChan chan OrderQueue) {
 				}
 			}
 		}
-		// Only send new if new button is pushed
 		if prevbuttonsPressed != buttonsPressed {
 			orderButtonChan <- buttonsPressed
-
 		}
 		prevbuttonsPressed = buttonsPressed
 	}

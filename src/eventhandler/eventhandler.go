@@ -1,6 +1,7 @@
 package main
 
 import (
+	"../driver"
 	"../message"
 	"../network"
 	"../statemachine"
@@ -66,6 +67,9 @@ func (elev elevator) numOrdersInQueue() int {
 		if elev.queue.Down[i] == 1 {
 			numOrders += 1
 		}
+		if elev.queue.Internal[i] == 1 {
+			numOrders += 1
+		}
 	}
 	return numOrders
 }
@@ -79,6 +83,7 @@ func main() { //function should be renamed afterwards, this is just for testing
 		}
 		fmt.Println("No network connection")
 	}
+	driver.NetworkConnect(1)
 	fmt.Println("My IP", myIP)
 
 	//UDP channels
@@ -134,7 +139,6 @@ func main() { //function should be renamed afterwards, this is just for testing
 			// send udpmessage to correct routine
 			switch msg.MessageId {
 			case message.ElevatorStateUpdate, message.NewOrder:
-				fmt.Println("something to master")
 				NewMsgToMasterChan <- msg
 				//fmt.Println("New msg sent to master: ")
 
@@ -142,6 +146,7 @@ func main() { //function should be renamed afterwards, this is just for testing
 				if msg.ToIP == myIP {
 					var order statemachine.OrderQueue
 					for i := 0; i < 4; i++ {
+						order.Internal[i] = msg.OrderQueue[i]
 						order.Up[i] = msg.OrderQueue[(i + 4)]
 						order.Down[i] = msg.OrderQueue[(i + 8)]
 					}
@@ -156,6 +161,7 @@ func main() { //function should be renamed afterwards, this is just for testing
 			msg.MessageId = message.NewOrder
 			msg.FromIP = myIP
 			for i := 0; i < 4; i++ {
+				msg.OrderQueue[i] = order.Internal[i]
 				msg.OrderQueue[(i + 4)] = order.Up[i]
 				msg.OrderQueue[(i + 8)] = order.Down[i]
 			}
@@ -301,8 +307,10 @@ func masterThread(elevatorAddedChan chan string, elevatorRemovedChan chan string
 				var newOrder statemachine.OrderQueue
 				if master {
 					for i := 0; i < N_FLOORS; i++ {
+						newOrder.Internal[i] = msg.OrderQueue[i]
 						newOrder.Up[i] = msg.OrderQueue[(i + 4)]
 						newOrder.Down[i] = msg.OrderQueue[(i + 8)]
+
 					}
 
 					for _, elev := range connectedElev {
@@ -342,6 +350,14 @@ func masterThread(elevatorAddedChan chan string, elevatorRemovedChan chan string
 					NewOrderFromMasterChan <- msg
 
 				}
+				for i := 0; i < N_FLOORS; i++ {
+					if newOrder.Internal[i] == 1 {
+						elev = connectedElev[msg.FromIP]
+						elev.queue.Internal[i] = 1
+						connectedElev[msg.FromIP] = elev
+					}
+				}
+
 				break
 
 			case message.ElevatorStateUpdate:
@@ -350,6 +366,7 @@ func masterThread(elevatorAddedChan chan string, elevatorRemovedChan chan string
 				elev.currentFloor = msg.ElevatorStateUpdate[1]
 				elev.queue.Up[elev.currentFloor] = 0
 				elev.queue.Down[elev.currentFloor] = 0
+				elev.queue.Internal[elev.currentFloor] = 0
 				connectedElev[msg.FromIP] = elev
 				break
 			}
