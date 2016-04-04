@@ -361,7 +361,6 @@ func masterThread(lightCommandChan chan elevManager.LightCommand, elevatorAddedC
 				}
 				if master {
 					msg.MessageId = message.NewOrderFromMaster
-					fmt.Println("queue Update", elev.queue)
 					NewOrderFromMasterChan <- msg // send ON UDP
 
 				}
