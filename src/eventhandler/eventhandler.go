@@ -172,7 +172,6 @@ func main() { //function should be renamed afterwards, this is just for testing
 
 		case order := <-NewNetworkOrderFromSM:
 			//create UDP message and send via UDP
-			fmt.Println("received new network order from SM")
 			var msg message.UDPMessage
 			msg.MessageId = message.NewOrder
 			msg.FromIP = myIP
@@ -182,7 +181,7 @@ func main() { //function should be renamed afterwards, this is just for testing
 				msg.OrderQueue[(i + 8)] = order.Down[i]
 			}
 			//calculate checksum?
-			fmt.Println("new order sent on network")
+			fmt.Println("order sent on UDP")
 			UDPSendMsgChan <- msg
 
 		case stateUpdate := <-stateUpdateFromSM:

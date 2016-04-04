@@ -146,23 +146,30 @@ func ElevManager(lightCommandChan chan LightCommand, NewNetworkOrderFromSM chan 
 		var order OrderQueue
 		select {
 		case orderButtonPushed := <-orderButtonChan:
+			fmt.Println("button pushed")
 			for i := 0; i < N_FLOORS; i++ {
 				if (orderButtonPushed.Internal[i] != queue.Internal[i]) && (orderButtonPushed.Internal[i] == 1) {
 					queue.Internal[i] = 1
 					order.Internal[i] = 1
 					driver.ButtonLamp(2, i, 1)
+					NewNetworkOrderFromSM <- order
+					break
 				}
 				if (orderButtonPushed.Up[i] != queue.Up[i]) && (orderButtonPushed.Up[i] == 1) {
 					order.Up[i] = 1
+					NewNetworkOrderFromSM <- order
+					break
 				}
 				if (orderButtonPushed.Down[i] != queue.Down[i]) && (orderButtonPushed.Down[i] == 1) {
 					order.Down[i] = 1
+					NewNetworkOrderFromSM <- order
+					break
 				}
 
 			}
-			NewNetworkOrderFromSM <- order
 
 		case neworder := <-NewNetworkOrderToSM:
+			fmt.Println("Up order", neworder.Up)
 			for i := 0; i < N_FLOORS; i++ {
 				if neworder.Up[i] == 1 {
 					queue.Up[i] = 1
