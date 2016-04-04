@@ -136,6 +136,8 @@ func main() { //function should be renamed afterwards, this is just for testing
 			UDPSendMsgChan <- msg
 
 		case msg := <-UDPMsgReceivedChan:
+			fmt.Println("new message on UPD", msg)
+			fmt.Println("")
 			// send udpmessage to correct routine
 			switch msg.MessageId {
 			case message.ElevatorStateUpdate, message.NewOrder:
@@ -182,6 +184,7 @@ func main() { //function should be renamed afterwards, this is just for testing
 			}
 			//calculate checksum?
 			fmt.Println("order sent on UDP")
+
 			UDPSendMsgChan <- msg
 
 		case stateUpdate := <-stateUpdateFromSM:
@@ -231,6 +234,7 @@ func UDPsend(conn *net.UDPConn, UDPSendMsgChan chan message.UDPMessage, IP strin
 		case msg := <-UDPSendMsgChan:
 			encodedMsg, _ := message.UDPMessageEncode(msg)
 			network.ClientSend(conn, encodedMsg)
+			time.Sleep(time.Millisecond*10)
 		case <-restartUDPSendChan:
 			return
 		}
