@@ -140,8 +140,6 @@ func main() { //function should be renamed afterwards, this is just for testing
 			UDPSendMsgChan <- msg
 
 		case msg := <-UDPMsgReceivedChan:
-			fmt.Println("new message on UPD", msg)
-			fmt.Println("")
 			// send udpmessage to correct routine
 			switch msg.MessageId {
 			case message.ElevatorStateUpdate, message.NewOrder:
@@ -190,7 +188,6 @@ func main() { //function should be renamed afterwards, this is just for testing
 				msg.OrderQueue[(i + 8)] = order.Down[i]
 			}
 			//calculate checksum?
-			fmt.Println("order sent on UDP")
 
 			UDPSendMsgChan <- msg
 
@@ -349,7 +346,6 @@ func masterThread(lightCommandChan chan elevManager.LightCommand, elevatorAddedC
 						}
 					}
 					// this handles single elevator on network
-
 					if IP == "" {
 						msg.ToIP = IP
 						IP = myIP
@@ -357,7 +353,6 @@ func masterThread(lightCommandChan chan elevManager.LightCommand, elevatorAddedC
 					} else {
 						msg.ToIP = IP
 					}
-
 					//end of comment
 					//update masters copy of the queue
 					for i := 0; i < N_FLOORS; i++ {
@@ -387,7 +382,6 @@ func masterThread(lightCommandChan chan elevManager.LightCommand, elevatorAddedC
 				break
 
 			case message.NewOrderFromMaster:
-
 				if(!master){
 					IP := msg.ToIP
 
@@ -408,12 +402,8 @@ func masterThread(lightCommandChan chan elevManager.LightCommand, elevatorAddedC
 		case message.ElevatorStateUpdate:
 			var light elevManager.LightCommand
 			elev = connectedElev[msg.FromIP]
-			fmt.Println("heis: ", msg.FromIP)
 			elev.direction = msg.ElevatorStateUpdate[0]
 			elev.currentFloor = msg.ElevatorStateUpdate[1]
-			fmt.Println("current floor ", elev.currentFloor)
-			fmt.Println("up queue ", elev.queue.Up)
-			fmt.Println("\n\n\n\n\n\n\n\n")
 
 			if elev.queue.Up[elev.currentFloor] == 1 {
 				light = [3]int{0, elev.currentFloor, 0}

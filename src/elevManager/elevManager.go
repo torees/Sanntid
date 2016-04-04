@@ -149,7 +149,6 @@ func ElevManager(requestStateUpdateChan chan bool, lightCommandChan chan LightCo
 		var order OrderQueue
 		select {
 		case orderButtonPushed := <-orderButtonChan:
-			fmt.Println("button pushed")
 			for i := 0; i < N_FLOORS; i++ {
 				if (orderButtonPushed.Internal[i] != queue.Internal[i]) && (orderButtonPushed.Internal[i] == 1) {
 					queue.Internal[i] = 1
@@ -214,8 +213,8 @@ func removeFloorFromQueue(currentFloor int, queue *OrderQueue) {
 	queue.Up[currentFloor] = 0
 	queue.Down[currentFloor] = 0
 	driver.ButtonLamp(2, currentFloor, 0)
-	driver.ButtonLamp(1, currentFloor, 0)
-	driver.ButtonLamp(2, currentFloor, 0)
+	//driver.ButtonLamp(1, currentFloor, 0)
+	//driver.ButtonLamp(2, currentFloor, 0)
 }
 
 func stopOnFloor(elevDir Direction, currentFloor int, queue *OrderQueue) bool {
@@ -291,7 +290,18 @@ func CheckOrderButton(orderButtonChan chan OrderQueue) {
 				}
 			}
 		}
-		if prevbuttonsPressed != buttonsPressed {
+		var num int
+		for i:= 0; i< N_FLOORS; i++{
+			if(buttonsPressed.Up[i] ==1){
+				num +=1}
+			if (buttonsPressed.Down[i] ==1){
+				num +=1
+			} 
+			if(buttonsPressed.Internal[i] ==1) {
+				num += 1
+			}
+		}
+		if ((prevbuttonsPressed != buttonsPressed) && num == 1) {
 			orderButtonChan <- buttonsPressed
 		}
 		prevbuttonsPressed = buttonsPressed
