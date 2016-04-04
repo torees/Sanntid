@@ -320,45 +320,46 @@ func masterThread(lightCommandChan chan elevManager.LightCommand, elevatorAddedC
 				var IP string
 				orderCost := 25
 				var newOrder elevManager.OrderQueue
+				
+				for i := 0; i < N_FLOORS; i++ {
+					newOrder.Internal[i] = msg.OrderQueue[i]
+					newOrder.Up[i] = msg.OrderQueue[(i + 4)]
+					newOrder.Down[i] = msg.OrderQueue[(i + 8)]
+
+				}
+
+				for _, elev := range connectedElev {
+					tempOrderCost, tempIP := elev.cost(newOrder)
+					if tempOrderCost < orderCost {
+						orderCost = tempOrderCost
+						IP = tempIP
+					}
+				}
+				// this handles single elevator on network
+
+				if IP == "" {
+					msg.ToIP = IP
+					IP = myIP
+
+				} else {
+					msg.ToIP = IP
+				}
+
+				//end of comment
+				//update masters copy of the queue
+				for i := 0; i < N_FLOORS; i++ {
+					if newOrder.Up[i] == 1 {
+						elev = connectedElev[IP]
+						elev.queue.Up[i] = 1
+						connectedElev[IP] = elev
+					}
+					if newOrder.Down[i] == 1 {
+						elev = connectedElev[IP]
+						elev.queue.Down[i] = 1
+						connectedElev[IP] = elev
+					}
+				}
 				if master {
-					for i := 0; i < N_FLOORS; i++ {
-						newOrder.Internal[i] = msg.OrderQueue[i]
-						newOrder.Up[i] = msg.OrderQueue[(i + 4)]
-						newOrder.Down[i] = msg.OrderQueue[(i + 8)]
-
-					}
-
-					for _, elev := range connectedElev {
-						tempOrderCost, tempIP := elev.cost(newOrder)
-						if tempOrderCost < orderCost {
-							orderCost = tempOrderCost
-							IP = tempIP
-						}
-					}
-					// this handles single elevator on network
-
-					if IP == "" {
-						msg.ToIP = IP
-						IP = myIP
-
-					} else {
-						msg.ToIP = IP
-					}
-
-					//end of comment
-					//update masters copy of the queue
-					for i := 0; i < N_FLOORS; i++ {
-						if newOrder.Up[i] == 1 {
-							elev = connectedElev[IP]
-							elev.queue.Up[i] = 1
-							connectedElev[IP] = elev
-						}
-						if newOrder.Down[i] == 1 {
-							elev = connectedElev[IP]
-							elev.queue.Down[i] = 1
-							connectedElev[IP] = elev
-						}
-					}
 					msg.MessageId = message.NewOrderFromMaster
 					fmt.Println("queue Update", elev.queue)
 					NewOrderFromMasterChan <- msg // send ON UDP
