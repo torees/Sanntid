@@ -2,9 +2,9 @@ package main
 
 import (
 	"../driver"
+	"../elevManager"
 	"../message"
 	"../network"
-	"../statemachine"
 	"fmt"
 	"math"
 	"net"
@@ -21,18 +21,18 @@ const N_ELEVATORS = 3
 const N_FLOORS = 4
 
 type elevator struct {
-	queue        statemachine.OrderQueue
+	queue        elevManager.OrderQueue
 	direction    int
 	currentFloor int
 	IP           string
 }
 
-func (elev elevator) cost(order statemachine.OrderQueue) (int, string) {
+func (elev elevator) cost(order elevManager.OrderQueue) (int, string) {
 	// do cost calculation on order
 	//return cost value and IP
-	const dirCost = 1
-	const distCost = 2
-	const numOrderCost = 4
+	const dirCost = 2
+	const distCost = 3
+	const numOrderCost = 2
 	cost := 0
 
 	distanceCost := (elev.currentFloor - elev.findOrderFloor(order)) * distCost
@@ -44,12 +44,12 @@ func (elev elevator) cost(order statemachine.OrderQueue) (int, string) {
 	}
 
 	cost = elev.numOrdersInQueue()*numOrderCost + distanceCost + directionCost
-	fmt.Println(cost, elev.IP)
+	fmt.Println(cost, elev.IP, elev.queue)
 
 	return cost, elev.IP
 }
 
-func (elev elevator) findOrderFloor(order statemachine.OrderQueue) int {
+func (elev elevator) findOrderFloor(order elevManager.OrderQueue) int {
 	for i := 0; i < N_FLOORS; i++ {
 		if order.Up[i] == 1 || order.Down[i] == 1 {
 			return i
@@ -83,7 +83,7 @@ func main() { //function should be renamed afterwards, this is just for testing
 		}
 		fmt.Println("No network connection")
 	}
-	driver.NetworkConnect(1)
+	driver.NetworkConnect(0)
 	fmt.Println("My IP", myIP)
 
 	//UDP channels
@@ -94,15 +94,15 @@ func main() { //function should be renamed afterwards, this is just for testing
 	checkNetworkConChan := make(chan bool)
 	restartUDPSendChan := make(chan bool)
 
-	//Channels to statemachine
-	NewNetworkOrderToSM := make(chan statemachine.OrderQueue, 10)
-	NewNetworkOrderFromSM := make(chan statemachine.OrderQueue, 10)
+	//Channels to elevManager
+	NewNetworkOrderToSM := make(chan elevManager.OrderQueue, 10)
+	NewNetworkOrderFromSM := make(chan elevManager.OrderQueue, 10)
 	stateUpdateFromSM := make(chan [2]int, 10)
 
 	// Channels to master thread
 	NewMsgToMasterChan := make(chan message.UDPMessage, 10)
 	NewOrderFromMasterChan := make(chan message.UDPMessage, 10)
-
+	lightCommandChan := make(chan elevManager.LightCommand, 10)
 	elevatorAddedChan := make(chan string, 10)
 	elevatorRemovedChan := make(chan string, 10)
 
@@ -113,8 +113,8 @@ func main() { //function should be renamed afterwards, this is just for testing
 	// Goroutines
 	go UDPlisten(UDPlistenConn, UDPPingReceivedChan, UDPMsgReceivedChan)
 	go network.CheckNetworkConnection(checkNetworkConChan)
-	go masterThread(elevatorAddedChan, elevatorRemovedChan, NewMsgToMasterChan, NewOrderFromMasterChan, myIP)
-	go statemachine.StateMachine(NewNetworkOrderFromSM, NewNetworkOrderToSM, stateUpdateFromSM)
+	go masterThread(lightCommandChan, elevatorAddedChan, elevatorRemovedChan, NewMsgToMasterChan, NewOrderFromMasterChan, myIP)
+	go elevManager.ElevManager(lightCommandChan, NewNetworkOrderFromSM, NewNetworkOrderToSM, stateUpdateFromSM)
 
 	connectedElevTimers := make(map[string]*time.Timer)
 
@@ -139,12 +139,28 @@ func main() { //function should be renamed afterwards, this is just for testing
 			// send udpmessage to correct routine
 			switch msg.MessageId {
 			case message.ElevatorStateUpdate, message.NewOrder:
+
 				NewMsgToMasterChan <- msg
 				//fmt.Println("New msg sent to master: ")
 
 			case message.NewOrderFromMaster:
+				//tenn lys på n heiser
+				var light elevManager.LightCommand
+				for i := 0; i < N_FLOORS; i++ {
+					if msg.OrderQueue[i+4] == 1 {
+						light = [3]int{0, i, 1}
+						break
+
+					}
+					if msg.OrderQueue[i+8] == 1 {
+						light = [3]int{1, i, 1}
+						break
+					}
+				}
+				lightCommandChan <- light
+				/////////////////////////////////////////////////////////
 				if msg.ToIP == myIP {
-					var order statemachine.OrderQueue
+					var order elevManager.OrderQueue
 					for i := 0; i < 4; i++ {
 						order.Internal[i] = msg.OrderQueue[i]
 						order.Up[i] = msg.OrderQueue[(i + 4)]
@@ -247,7 +263,7 @@ func UDPlisten(conn *net.UDPConn, UDPPingReceivedChan chan message.UDPMessage, U
 	}
 }
 
-func masterThread(elevatorAddedChan chan string, elevatorRemovedChan chan string, NewMsgToMasterChan chan message.UDPMessage, NewOrderFromMasterChan chan message.UDPMessage, myIP string) {
+func masterThread(lightCommandChan chan elevManager.LightCommand, elevatorAddedChan chan string, elevatorRemovedChan chan string, NewMsgToMasterChan chan message.UDPMessage, NewOrderFromMasterChan chan message.UDPMessage, myIP string) {
 	numberOfelevators := 0
 	connectedElev := make(map[string]elevator)
 	master := true
@@ -304,7 +320,7 @@ func masterThread(elevatorAddedChan chan string, elevatorRemovedChan chan string
 
 				var IP string
 				orderCost := 25
-				var newOrder statemachine.OrderQueue
+				var newOrder elevManager.OrderQueue
 				if master {
 					for i := 0; i < N_FLOORS; i++ {
 						newOrder.Internal[i] = msg.OrderQueue[i]
@@ -319,9 +335,7 @@ func masterThread(elevatorAddedChan chan string, elevatorRemovedChan chan string
 							orderCost = tempOrderCost
 							IP = tempIP
 						}
-
 					}
-
 					// this handles single elevator on network
 
 					if IP == "" {
@@ -357,13 +371,23 @@ func masterThread(elevatorAddedChan chan string, elevatorRemovedChan chan string
 						connectedElev[msg.FromIP] = elev
 					}
 				}
-
 				break
 
 			case message.ElevatorStateUpdate:
+				var light elevManager.LightCommand
 				elev = connectedElev[msg.FromIP]
 				elev.direction = msg.ElevatorStateUpdate[0]
 				elev.currentFloor = msg.ElevatorStateUpdate[1]
+
+				if elev.queue.Up[elev.currentFloor] == 1 {
+					light = [3]int{1, elev.currentFloor, 0}
+					lightCommandChan <- light
+				}
+				if elev.queue.Down[elev.currentFloor] == 1 {
+					light = [3]int{1, elev.currentFloor, 0}
+					lightCommandChan <- light
+				}
+
 				elev.queue.Up[elev.currentFloor] = 0
 				elev.queue.Down[elev.currentFloor] = 0
 				elev.queue.Internal[elev.currentFloor] = 0

@@ -18,7 +18,7 @@ const (
 	UP   Elev_dir = 1
 )
 
-func ElevInit() {
+func HardwareInit() {
 	C.elev_init()
 }
 

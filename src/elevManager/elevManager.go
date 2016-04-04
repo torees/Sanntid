@@ -1,4 +1,4 @@
-package statemachine
+package elevManager
 
 import (
 	"../driver"
@@ -31,30 +31,8 @@ type OrderQueue struct {
 	Up       [N_FLOORS]int
 }
 
-func StateMachine(NewNetworkOrderFromSM chan OrderQueue, NewNetworkOrderToSM chan OrderQueue, stateUpdateFromSM chan [2]int) {
-	//variables
+type LightCommand [3]int //index: [0]: button [1]: floor [2] lightvalue
 
-	fmt.Println("Starting Elevator 3000...")
-	driver.ElevInit()
-
-	//channels
-	positionChan := make(chan int)
-
-	queueChan := make(chan OrderQueue)
-	orderButtonChan := make(chan OrderQueue)
-
-	//go-routines
-	go ElevPosition(positionChan)
-	go CheckOrderButton(orderButtonChan)
-
-	driver.ElevStart(1)
-	<-positionChan
-	driver.ElevStart(0)
-	fmt.Println("Initialized at floor", <-positionChan)
-
-	ElevManager(orderButtonChan, queueChan, positionChan, NewNetworkOrderFromSM, NewNetworkOrderToSM, stateUpdateFromSM)
-
-}
 func elevatorController(commandChan chan Command) {
 	doorOpen := false
 	doorTimeoutChan := make(chan bool)
@@ -135,13 +113,34 @@ func nextDirection(elevDir *Direction, queue *OrderQueue, currentFloor int) Comm
 
 }
 
-func ElevManager(orderButtonChan chan OrderQueue, queueChan chan OrderQueue, positionChan chan int, NewNetworkOrderFromSM chan OrderQueue, NewNetworkOrderToSM chan OrderQueue, stateUpdateFromSM chan [2]int) {
+func initializeElevator(positionChan chan int) {
+	driver.HardwareInit()
+	fmt.Println("Starting Elevator 3000...")
+	driver.ElevStart(1)
+	<-positionChan
+	driver.ElevStart(0)
+	fmt.Println("Initialized at floor", <-positionChan+1)
+
+}
+
+func ElevManager(lightCommandChan chan LightCommand, NewNetworkOrderFromSM chan OrderQueue, NewNetworkOrderToSM chan OrderQueue, stateUpdateFromSM chan [2]int) {
 
 	var queue OrderQueue
 
+	//channels
+	positionChan := make(chan int)
 	commandChan := make(chan Command, 100)
+	orderButtonChan := make(chan OrderQueue)
+
+	//goroutines
 	go elevatorController(commandChan)
+	go ElevPosition(positionChan)
+	go CheckOrderButton(orderButtonChan)
+
+	initializeElevator(positionChan)
+
 	elevDir := up_dir
+
 	defer driver.ElevStart(0)
 	for {
 		var order OrderQueue
@@ -192,7 +191,10 @@ func ElevManager(orderButtonChan chan OrderQueue, queueChan chan OrderQueue, pos
 				commandChan <- nextDir
 			}
 
+		case light := <-lightCommandChan:
+			driver.ButtonLamp(driver.Button_type(light[0]), light[1], light[2])
 		}
+
 	}
 
 }
@@ -201,8 +203,8 @@ func removeFloorFromQueue(currentFloor int, queue *OrderQueue) {
 	queue.Up[currentFloor] = 0
 	queue.Down[currentFloor] = 0
 	driver.ButtonLamp(0, currentFloor, 0)
-	driver.ButtonLamp(1, currentFloor, 0)
-	driver.ButtonLamp(2, currentFloor, 0)
+	//driver.ButtonLamp(1, currentFloor, 0)
+	//driver.ButtonLamp(2, currentFloor, 0)
 }
 
 func stopOnFloor(elevDir Direction, currentFloor int, queue *OrderQueue) bool {

@@ -54,13 +54,13 @@ func CheckNetworkConnection(networkAccessChannel chan bool) {
 		ip := GetNetworkIP()
 		if ip == "::1" && network == true {
 			network = false
-			driver.NetworkConnect(0)
+			driver.NetworkConnect(1)
 			networkAccessChannel <- false
 
 		}
 		if (ip != "::1") && !network {
 			network = true
-			driver.NetworkConnect(1)
+			driver.NetworkConnect(0)
 			networkAccessChannel <- true
 		}
 
