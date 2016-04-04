@@ -19,6 +19,7 @@ const (
 
 const N_ELEVATORS = 3
 const N_FLOORS = 4
+const MAX_ORDER_COST = 25
 
 type elevator struct {
 	queue        elevManager.OrderQueue
@@ -160,6 +161,9 @@ func main() { //function should be renamed afterwards, this is just for testing
 					}
 				}
 				lightCommandChan <- light
+				///////////////////////////
+				// Make all copies update elevators queues 
+				NewMsgToMasterChan <- msg
 				/////////////////////////////////////////////////////////
 				if msg.ToIP == myIP {
 					var order elevManager.OrderQueue
@@ -318,52 +322,54 @@ func masterThread(lightCommandChan chan elevManager.LightCommand, elevatorAddedC
 			fmt.Println(IPlist)
 
 		case msg := <-NewMsgToMasterChan:
+			
+			var IP string
+			var newOrder elevManager.OrderQueue
+
+			for i := 0; i < N_FLOORS; i++ {
+				newOrder.Internal[i] = msg.OrderQueue[i]
+				newOrder.Up[i] = msg.OrderQueue[(i + 4)]
+				newOrder.Down[i] = msg.OrderQueue[(i + 8)]
+
+			}
+
 			switch msg.MessageId {
 			case message.NewOrder:
-
-				var IP string
-				orderCost := 25
-				var newOrder elevManager.OrderQueue
 				
-				for i := 0; i < N_FLOORS; i++ {
-					newOrder.Internal[i] = msg.OrderQueue[i]
-					newOrder.Up[i] = msg.OrderQueue[(i + 4)]
-					newOrder.Down[i] = msg.OrderQueue[(i + 8)]
-
-				}
-
-				for _, elev := range connectedElev {
-					tempOrderCost, tempIP := elev.cost(newOrder)
-					if tempOrderCost < orderCost {
-						orderCost = tempOrderCost
-						IP = tempIP
-					}
-				}
-				// this handles single elevator on network
-
-				if IP == "" {
-					msg.ToIP = IP
-					IP = myIP
-
-				} else {
-					msg.ToIP = IP
-				}
-
-				//end of comment
-				//update masters copy of the queue
-				for i := 0; i < N_FLOORS; i++ {
-					if newOrder.Up[i] == 1 {
-						elev = connectedElev[IP]
-						elev.queue.Up[i] = 1
-						connectedElev[IP] = elev
-					}
-					if newOrder.Down[i] == 1 {
-						elev = connectedElev[IP]
-						elev.queue.Down[i] = 1
-						connectedElev[IP] = elev
-					}
-				}
+				orderCost := MAX_ORDER_COST
 				if master {
+					for _, elev := range connectedElev {
+						tempOrderCost, tempIP := elev.cost(newOrder)
+						if tempOrderCost < orderCost {
+							orderCost = tempOrderCost
+							IP = tempIP
+						}
+					}
+					// this handles single elevator on network
+
+					if IP == "" {
+						msg.ToIP = IP
+						IP = myIP
+
+					} else {
+						msg.ToIP = IP
+					}
+
+					//end of comment
+					//update masters copy of the queue
+					for i := 0; i < N_FLOORS; i++ {
+						if newOrder.Up[i] == 1 {
+							elev = connectedElev[IP]
+							elev.queue.Up[i] = 1
+							connectedElev[IP] = elev
+						}
+						if newOrder.Down[i] == 1 {
+							elev = connectedElev[IP]
+							elev.queue.Down[i] = 1
+							connectedElev[IP] = elev
+						}
+					}
+				
 					msg.MessageId = message.NewOrderFromMaster
 					NewOrderFromMasterChan <- msg // send ON UDP
 
@@ -377,6 +383,24 @@ func masterThread(lightCommandChan chan elevManager.LightCommand, elevatorAddedC
 				}
 				break
 
+			case message.NewOrderFromMaster:
+
+				if(!master){
+					IP := msg.ToIP
+
+					for i := 0; i < N_FLOORS; i++ {
+					if newOrder.Up[i] == 1 {
+						elev = connectedElev[IP]
+						elev.queue.Up[i] = 1
+						connectedElev[IP] = elev
+					}
+					if newOrder.Down[i] == 1 {
+						elev = connectedElev[IP]
+						elev.queue.Down[i] = 1
+						connectedElev[IP] = elev
+					}
+				}
+				}
 
 		case message.ElevatorStateUpdate:
 			var light elevManager.LightCommand
