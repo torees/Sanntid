@@ -31,8 +31,8 @@ func (elev elevator) cost(order elevManager.OrderQueue) (int, string) {
 	// do cost calculation on order
 	//return cost value and IP
 	const dirCost = 2
-	const distCost = 3
-	const numOrderCost = 4
+	const distCost = 4
+	const numOrderCost = 6
 	cost := 0
 
 	distanceCost := (elev.currentFloor - elev.findOrderFloor(order)) * distCost
