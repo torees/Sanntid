@@ -143,8 +143,9 @@ func ElevManager(lightCommandChan chan LightCommand, NewNetworkOrderFromSM chan 
 	initializeElevator(positionChan, stateUpdateFromSM)
 
 	elevDir := up_dir
-
+	ticker := time.NewTicker(time.Millisecond * 1000).C
 	defer driver.ElevStart(0)
+	var stateUpdate [2]int
 	for {
 		var order OrderQueue
 		select {
@@ -185,12 +186,10 @@ func ElevManager(lightCommandChan chan LightCommand, NewNetworkOrderFromSM chan 
 			break
 
 		case currentFloor := <-positionChan:
-			var stateUpdate [2]int
-
+			stateUpdate[0], stateUpdate[1] = int(elevDir), currentFloor
 			if stopOnFloor(elevDir, currentFloor, &queue) == true {
 				commandChan <- stop
 				commandChan <- openDoor
-				stateUpdate[0], stateUpdate[1] = int(elevDir), currentFloor
 				stateUpdateFromSM <- stateUpdate
 
 			}
@@ -202,6 +201,10 @@ func ElevManager(lightCommandChan chan LightCommand, NewNetworkOrderFromSM chan 
 
 		case light := <-lightCommandChan:
 			driver.ButtonLamp(driver.Button_type(light[0]), light[1], light[2])
+		
+		case <- ticker:
+			stateUpdateFromSM <- stateUpdate			
+
 		}
 
 	}
