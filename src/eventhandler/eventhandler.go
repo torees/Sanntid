@@ -28,8 +28,8 @@ type elevator struct {
 func (elev elevator) cost(order statemachine.OrderQueue) (int, string) {
 	// do cost calculation on order
 	//return cost value and IP
-	const dirCost = 10
-	const distCost = 5
+	const dirCost = 1
+	const distCost = 2
 	const numOrderCost = 4
 	cost := 0
 
@@ -298,8 +298,9 @@ func masterThread(elevatorAddedChan chan string, elevatorRemovedChan chan string
 		case msg := <-NewMsgToMasterChan:
 			switch msg.MessageId {
 			case message.NewOrder:
+
 				var IP string
-				var orderCost int
+				orderCost := 25
 				var newOrder statemachine.OrderQueue
 				if master {
 					for i := 0; i < N_FLOORS; i++ {
@@ -308,24 +309,29 @@ func masterThread(elevatorAddedChan chan string, elevatorRemovedChan chan string
 					}
 
 					for _, elev := range connectedElev {
-						fmt.Println(elev)
 						tempOrderCost, tempIP := elev.cost(newOrder)
-
+						fmt.Println(elev)
 						if tempOrderCost < orderCost {
 							orderCost = tempOrderCost
 							IP = tempIP
+							fmt.Println("This elevator will handle the order: ", IP)
+
 						}
+
 					}
+
 					// this handles single elevator on network
+
 					if IP == "" {
-						msg.ToIP = myIP
+						msg.ToIP = IP
 						IP = myIP
+
 					} else {
 						msg.ToIP = IP
 					}
 
 					//end of comment
-
+					//update masters copy of the queue
 					for i := 0; i < N_FLOORS; i++ {
 						if newOrder.Up[i] == 1 {
 							elev = connectedElev[IP]
@@ -348,7 +354,6 @@ func masterThread(elevatorAddedChan chan string, elevatorRemovedChan chan string
 				elev = connectedElev[msg.FromIP]
 				fmt.Println("Previous info on elevator: ", elev)
 				elev.direction = msg.ElevatorStateUpdate[0]
-
 				elev.currentFloor = msg.ElevatorStateUpdate[1]
 				elev.queue.Up[elev.currentFloor] = 0
 				elev.queue.Down[elev.currentFloor] = 0
