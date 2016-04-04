@@ -380,7 +380,7 @@ func masterThread(lightCommandChan chan elevManager.LightCommand, elevatorAddedC
 				elev.currentFloor = msg.ElevatorStateUpdate[1]
 
 				if elev.queue.Up[elev.currentFloor] == 1 {
-					light = [3]int{1, elev.currentFloor, 0}
+					light = [3]int{0, elev.currentFloor, 0}
 					lightCommandChan <- light
 				}
 				if elev.queue.Down[elev.currentFloor] == 1 {

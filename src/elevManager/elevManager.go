@@ -202,7 +202,7 @@ func removeFloorFromQueue(currentFloor int, queue *OrderQueue) {
 	queue.Internal[currentFloor] = 0
 	queue.Up[currentFloor] = 0
 	queue.Down[currentFloor] = 0
-	driver.ButtonLamp(0, currentFloor, 0)
+	driver.ButtonLamp(2, currentFloor, 0)
 	//driver.ButtonLamp(1, currentFloor, 0)
 	//driver.ButtonLamp(2, currentFloor, 0)
 }
