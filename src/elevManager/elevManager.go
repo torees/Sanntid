@@ -2,15 +2,14 @@ package elevManager
 
 import (
 	"../driver"
+	. "../internalOrders"
+	"../message"
 	"fmt"
 	"time"
-	. "../internalOrders"
 )
 
 type Direction int
 type Command int
-
-
 
 const (
 	stop Command = iota
@@ -112,23 +111,20 @@ func nextDirection(elevDir *Direction, queue *OrderQueue, currentFloor int) Comm
 
 }
 
-func initializeElevator(positionChan chan int, stateUpdateFromSM chan [2]int) {
+func initializeElevator(positionChan chan int, requestStateUpdateChan chan bool) {
 	driver.HardwareInit()
-	var stateUpdate [2]int
 	fmt.Println("Starting Elevator 3000...")
 	driver.ElevStart(1)
-	initialFloor:=<-positionChan
+	<-positionChan
 	driver.ElevStart(0)
 	fmt.Println("Initialized at floor", <-positionChan+1)
-	stateUpdate[0], stateUpdate[1] = int(up_dir), initialFloor
-	stateUpdateFromSM <- stateUpdate
+	requestStateUpdateChan <- true
 
 }
 
-func ElevManager(requestStateUpdateChan chan bool, lightCommandChan chan LightCommand, NewNetworkOrderFromSM chan OrderQueue, NewNetworkOrderToSM chan OrderQueue, stateUpdateFromSM chan [2]int) {
+func ElevManager(requestStateUpdateChan chan bool, lightCommandChan chan LightCommand, NewNetworkOrderFromSM chan OrderQueue, NewNetworkOrderToSM chan OrderQueue, stateUpdateFromSM chan message.UDPMessage) {
 
 	var queue OrderQueue
-
 
 	//channels
 	positionChan := make(chan int)
@@ -140,15 +136,16 @@ func ElevManager(requestStateUpdateChan chan bool, lightCommandChan chan LightCo
 	go ElevPosition(positionChan)
 	go CheckOrderButton(orderButtonChan)
 
-	initializeElevator(positionChan, stateUpdateFromSM)
-	var order OrderQueue
-	//WriteInternals(order.Internal)
 	queue.Internal = ReadInternals()
+	initializeElevator(positionChan, requestStateUpdateChan)
+
+	//WriteInternals(order.Internal)
+
 	elevDir := up_dir
 	defer driver.ElevStart(0)
 	var stateUpdate [2]int
 	for {
-		
+		var order OrderQueue
 		select {
 		case orderButtonPushed := <-orderButtonChan:
 			for i := 0; i < driver.N_FLOORS; i++ {
@@ -192,7 +189,7 @@ func ElevManager(requestStateUpdateChan chan bool, lightCommandChan chan LightCo
 			if stopOnFloor(elevDir, currentFloor, &queue) == true {
 				commandChan <- stop
 				commandChan <- openDoor
-				stateUpdateFromSM <- stateUpdate
+				requestStateUpdateChan <- true
 
 			}
 			nextDir := nextDirection(&elevDir, &queue, currentFloor)
@@ -203,9 +200,15 @@ func ElevManager(requestStateUpdateChan chan bool, lightCommandChan chan LightCo
 
 		case light := <-lightCommandChan:
 			driver.ButtonLamp(driver.Button_type(light[0]), light[1], light[2])
-		
-		case <- requestStateUpdateChan:
-			stateUpdateFromSM <- stateUpdate			
+
+		case <-requestStateUpdateChan:
+			var localqueue [12]int
+			for i := 0; i < driver.N_FLOORS; i++ {
+				localqueue[i] = queue.Internal[i]
+				localqueue[i+4] = queue.Down[i]
+				localqueue[i+8] = queue.Up[i]
+			}
+			stateUpdateFromSM <- message.UDPMessage{OrderQueue: localqueue, ElevatorStateUpdate: stateUpdate}
 
 		}
 
@@ -218,8 +221,6 @@ func removeFloorFromQueue(currentFloor int, queue *OrderQueue) {
 	queue.Down[currentFloor] = 0
 	driver.ButtonLamp(2, currentFloor, 0)
 	WriteInternals(queue.Internal)
-	//driver.ButtonLamp(1, currentFloor, 0)
-	//driver.ButtonLamp(2, currentFloor, 0)
 }
 
 func stopOnFloor(elevDir Direction, currentFloor int, queue *OrderQueue) bool {
@@ -270,10 +271,9 @@ func stopOnFloor(elevDir Direction, currentFloor int, queue *OrderQueue) bool {
 func CheckOrderButton(orderButtonChan chan OrderQueue) {
 
 	var prevbuttonsPressed OrderQueue
-	var buttonsPressed OrderQueue
 
 	for {
-
+		var buttonsPressed OrderQueue
 		for floor := 0; floor < driver.N_FLOORS; floor++ {
 			for button := 0; button < 3; button++ {
 				if (floor == 0 && button == 1) || (floor == 3 && button == 0) {
@@ -281,13 +281,28 @@ func CheckOrderButton(orderButtonChan chan OrderQueue) {
 				} else {
 					switch button {
 					case 0:
-						buttonsPressed.Up[floor] = driver.ButtonPushed(driver.Button_type(button), floor)
+						buttonVal := driver.ButtonPushed(driver.Button_type(button), floor)
+						if buttonVal == 1 && prevbuttonsPressed.Up[floor] == 0 {
+							buttonsPressed.Up[floor] = 1
+							orderButtonChan <- buttonsPressed
+						}
+						prevbuttonsPressed.Up[floor] = buttonVal
 						break
 					case 1:
-						buttonsPressed.Down[floor] = driver.ButtonPushed(driver.Button_type(button), floor)
+						buttonVal := driver.ButtonPushed(driver.Button_type(button), floor)
+						if buttonVal == 1 && prevbuttonsPressed.Down[floor] == 0 {
+							buttonsPressed.Down[floor] = 1
+							orderButtonChan <- buttonsPressed
+						}
+						prevbuttonsPressed.Down[floor] = buttonVal
 						break
 					case 2:
-						buttonsPressed.Internal[floor] = driver.ButtonPushed(driver.Button_type(button), floor)
+						buttonVal := driver.ButtonPushed(driver.Button_type(button), floor)
+						if buttonVal == 1 && prevbuttonsPressed.Internal[floor] == 0 {
+							buttonsPressed.Internal[floor] = 1
+							orderButtonChan <- buttonsPressed
+						}
+						prevbuttonsPressed.Internal[floor] = buttonVal
 						break
 					default:
 
@@ -295,21 +310,6 @@ func CheckOrderButton(orderButtonChan chan OrderQueue) {
 				}
 			}
 		}
-		var num int
-		for i:= 0; i< driver.N_FLOORS; i++{
-			if(buttonsPressed.Up[i] ==1){
-				num +=1}
-			if (buttonsPressed.Down[i] ==1){
-				num +=1
-			} 
-			if(buttonsPressed.Internal[i] ==1) {
-				num += 1
-			}
-		}
-		if ((prevbuttonsPressed != buttonsPressed) && num == 1) {
-			orderButtonChan <- buttonsPressed
-		}
-		prevbuttonsPressed = buttonsPressed
 	}
 }
 
