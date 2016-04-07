@@ -122,7 +122,7 @@ func initializeElevator(positionChan chan int, requestStateUpdateChan chan bool)
 
 }
 
-func ElevManager(requestStateUpdateChan chan bool, lightCommandChan chan LightCommand, NewNetworkOrderFromSM chan OrderQueue, NewNetworkOrderToSM chan OrderQueue, stateUpdateFromSM chan message.UDPMessage) {
+func ElevManager(requestQueueKill chan bool, requestStateUpdateChan chan bool, lightCommandChan chan LightCommand, NewNetworkOrderFromSM chan OrderQueue, NewNetworkOrderToSM chan OrderQueue, stateUpdateFromSM chan message.UDPMessage) {
 
 	var queue OrderQueue
 
@@ -210,6 +210,15 @@ func ElevManager(requestStateUpdateChan chan bool, lightCommandChan chan LightCo
 			}
 			stateUpdateFromSM <- message.UDPMessage{OrderQueue: localqueue, ElevatorStateUpdate: stateUpdate}
 
+		case <-requestQueueKill:
+			emptyQueue := [driver.N_FLOORS]int{0, 0, 0, 0}
+			queue.Up = emptyQueue
+			queue.Down = emptyQueue
+			for floor := 0; floor < driver.N_FLOORS; floor++ {
+				driver.ButtonLamp(1, floor, 0)
+				driver.ButtonLamp(0, floor, 0)
+
+			}
 		}
 
 	}
@@ -264,7 +273,12 @@ func stopOnFloor(elevDir Direction, currentFloor int, queue *OrderQueue) bool {
 			}
 		}
 	}
-	return false
+
+	if currentFloor == driver.BOTTOM_FLOOR || currentFloor == driver.TOP_FLOOR {
+		return true
+	} else {
+		return false
+	}
 
 }
 

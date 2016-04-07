@@ -54,20 +54,20 @@ func serverListenUDP(conn *net.UDPConn, buf []byte) int {
 
 }
 
-func CheckNetworkConnection(networkAccessChannel chan bool) {
+func CheckNetworkConnection(checkNetworkConChan chan bool) {
 	network := true
 	for {
 		ip := GetNetworkIP()
 		if ip == "::1" && network == true {
 			network = false
 			driver.NetworkConnect(1)
-			networkAccessChannel <- false
+			checkNetworkConChan <- false
 
 		}
 		if (ip != "::1") && !network {
 			network = true
 			driver.NetworkConnect(0)
-			networkAccessChannel <- true
+			checkNetworkConChan <- true
 		}
 
 	}

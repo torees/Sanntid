@@ -90,6 +90,7 @@ func main() { //function should be renamed afterwards, this is just for testing
 			break
 		}
 		fmt.Println("No network connection")
+		time.Sleep(time.Second * 1)
 	}
 	NetworkConnect(0)
 	fmt.Println("My IP", myIP)
@@ -106,7 +107,8 @@ func main() { //function should be renamed afterwards, this is just for testing
 	NewNetworkOrderToSM := make(chan elevManager.OrderQueue, 10)
 	NewNetworkOrderFromSM := make(chan elevManager.OrderQueue, 10)
 	stateUpdateFromSM := make(chan message.UDPMessage, 10)
-	requestStateUpdateChan := make(chan bool, 10)
+	requestStateUpdateChan := make(chan bool, 100)
+	requestQueueKill := make(chan bool, 10)
 
 	// Channels to master thread
 	NewMsgToMasterChan := make(chan message.UDPMessage, 10)
@@ -122,11 +124,11 @@ func main() { //function should be renamed afterwards, this is just for testing
 	// Goroutines
 	go network.UDPlisten(UDPlistenConn, UDPPingReceivedChan, UDPMsgReceivedChan)
 	go network.CheckNetworkConnection(checkNetworkConChan)
-	go masterThread(lightCommandChan, elevatorAddedChan, elevatorRemovedChan, NewMsgToMasterChan, NewOrderFromMasterChan, myIP)
-	go elevManager.ElevManager(requestStateUpdateChan, lightCommandChan, NewNetworkOrderFromSM, NewNetworkOrderToSM, stateUpdateFromSM)
+	go masterThread(requestQueueKill, lightCommandChan, elevatorAddedChan, elevatorRemovedChan, NewMsgToMasterChan, NewOrderFromMasterChan, myIP)
+	go elevManager.ElevManager(requestQueueKill, requestStateUpdateChan, lightCommandChan, NewNetworkOrderFromSM, NewNetworkOrderToSM, stateUpdateFromSM)
 
 	connectedElevTimers := make(map[string]*time.Timer)
-
+	offline := false
 	for {
 		select {
 		case msg := <-UDPPingReceivedChan:
@@ -143,9 +145,11 @@ func main() { //function should be renamed afterwards, this is just for testing
 			}
 
 		case msg := <-NewOrderFromMasterChan:
+
 			UDPSendMsgChan <- msg
 
 		case msg := <-UDPMsgReceivedChan:
+
 			// send udpmessage to correct routine
 			switch msg.MessageId {
 			case message.ElevatorStateUpdate, message.NewOrder:
@@ -193,19 +197,22 @@ func main() { //function should be renamed afterwards, this is just for testing
 				msg.OrderQueue[(i + 8)] = order.Down[i]
 			}
 			//calculate checksum?
-
-			UDPSendMsgChan <- msg
-
+			if !offline {
+				UDPSendMsgChan <- msg
+			}
 		case msg := <-stateUpdateFromSM:
 			msg.MessageId = message.ElevatorStateUpdate
 			msg.FromIP = myIP
 			//msg.Checksum = CalculateCheckSum(msg)
-			UDPSendMsgChan <- msg
-
+			if !offline {
+				UDPSendMsgChan <- msg
+			}
 		case haveNetwork := <-checkNetworkConChan:
 			if haveNetwork {
+				offline = false
 				network.StartUDPSend(UDPSendMsgChan, restartUDPSendChan, myIP)
 			} else {
+				offline = true
 				restartUDPSendChan <- true
 			}
 
@@ -221,14 +228,14 @@ func deleteElevator(connectedElevTimers *map[string]*time.Timer, msg message.UDP
 	fmt.Println("deleting elevator :", msg.FromIP)
 }
 
-func masterThread(lightCommandChan chan elevManager.LightCommand, elevatorAddedChan chan string, elevatorRemovedChan chan string, NewMsgToMasterChan chan message.UDPMessage, NewOrderFromMasterChan chan message.UDPMessage, myIP string) {
+func masterThread(requestQueueKill chan bool, lightCommandChan chan elevManager.LightCommand, elevatorAddedChan chan string, elevatorRemovedChan chan string, NewMsgToMasterChan chan message.UDPMessage, NewOrderFromMasterChan chan message.UDPMessage, myIP string) {
 	numberOfelevators := 0
 	connectedElev := make(map[string]elevator)
 	master := true
+	offline := false
 	var IPlist []string
 	var elev elevator
 	for {
-
 		select {
 		case elevatorIP := <-elevatorRemovedChan:
 			IPlist = IPlist[:0]
@@ -250,6 +257,11 @@ func masterThread(lightCommandChan chan elevManager.LightCommand, elevatorAddedC
 			elev = connectedElev[elevatorIP]
 			tempqueue := elev.queue
 			delete(connectedElev, elevatorIP)
+			//ask elevManager do delete queue externals
+			if elevatorIP == myIP {
+				requestQueueKill <- true
+				offline = true
+			}
 
 			if numberOfelevators == 0 {
 				master = true
@@ -270,6 +282,7 @@ func masterThread(lightCommandChan chan elevManager.LightCommand, elevatorAddedC
 
 		case id := <-elevatorAddedChan:
 			numberOfelevators += 1
+			offline = false
 			if numberOfelevators > N_ELEVATORS {
 				//fault tolerance
 				fmt.Println("To many elevators")
@@ -306,7 +319,7 @@ func masterThread(lightCommandChan chan elevManager.LightCommand, elevatorAddedC
 			case message.NewOrder:
 				uniqueOrder := true
 				orderCost := MAX_ORDER_COST
-				if master {
+				if master && !offline {
 					for _, elev := range connectedElev {
 						if !elev.newOrder(newOrder) {
 							fmt.Println("old order")
