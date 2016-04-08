@@ -69,7 +69,7 @@ func (elev elevator) numOrdersInQueue() int {
 }
 
 func (elev elevator) newOrder(order elevManager.OrderQueue) bool {
-	fmt.Println("elev orders", elev.queue, "new order", order)
+
 	for floor := 0; floor < N_FLOORS; floor++ {
 		if elev.queue.Up[floor] == 1 && order.Up[floor] == 1 {
 			return false
@@ -104,18 +104,17 @@ func main() { //function should be renamed afterwards, this is just for testing
 	restartUDPSendChan := make(chan bool)
 
 	//Channels to elevManager
-	NewNetworkOrderToSM := make(chan elevManager.OrderQueue, 10)
-	NewNetworkOrderFromSM := make(chan elevManager.OrderQueue, 10)
-	stateUpdateFromSM := make(chan message.UDPMessage, 10)
+	NewNetworkOrderToSM := make(chan elevManager.OrderQueue, 100)
+	NewNetworkOrderFromSM := make(chan elevManager.OrderQueue, 100)
+	stateUpdateFromSM := make(chan message.UDPMessage, 100)
 	requestStateUpdateChan := make(chan bool, 100)
-	requestQueueKill := make(chan bool, 10)
 
 	// Channels to master thread
-	NewMsgToMasterChan := make(chan message.UDPMessage, 10)
-	NewOrderFromMasterChan := make(chan message.UDPMessage, 10)
-	lightCommandChan := make(chan elevManager.LightCommand, 10)
-	elevatorAddedChan := make(chan string, 10)
-	elevatorRemovedChan := make(chan string, 10)
+	NewMsgToMasterChan := make(chan message.UDPMessage, 100)
+	NewOrderFromMasterChan := make(chan message.UDPMessage, 100)
+	lightCommandChan := make(chan elevManager.LightCommand, 100)
+	elevatorAddedChan := make(chan string, 100)
+	elevatorRemovedChan := make(chan string, 100)
 
 	//Init sockets for sending ping and messages
 	UDPlistenConn := network.ServerConnectUDP()
@@ -124,8 +123,8 @@ func main() { //function should be renamed afterwards, this is just for testing
 	// Goroutines
 	go network.UDPlisten(UDPlistenConn, UDPPingReceivedChan, UDPMsgReceivedChan)
 	go network.CheckNetworkConnection(checkNetworkConChan)
-	go masterThread(requestQueueKill, lightCommandChan, elevatorAddedChan, elevatorRemovedChan, NewMsgToMasterChan, NewOrderFromMasterChan, myIP)
-	go elevManager.ElevManager(requestQueueKill, requestStateUpdateChan, lightCommandChan, NewNetworkOrderFromSM, NewNetworkOrderToSM, stateUpdateFromSM)
+	go masterThread(lightCommandChan, elevatorAddedChan, elevatorRemovedChan, NewMsgToMasterChan, NewOrderFromMasterChan, myIP)
+	go elevManager.ElevManager(requestStateUpdateChan, lightCommandChan, NewNetworkOrderFromSM, NewNetworkOrderToSM, stateUpdateFromSM)
 
 	connectedElevTimers := make(map[string]*time.Timer)
 	offline := false
@@ -153,7 +152,7 @@ func main() { //function should be renamed afterwards, this is just for testing
 			// send udpmessage to correct routine
 			switch msg.MessageId {
 			case message.ElevatorStateUpdate, message.NewOrder:
-
+				fmt.Println("hello debuggin new order received on UDP")
 				NewMsgToMasterChan <- msg
 
 			case message.NewOrderFromMaster:
@@ -228,7 +227,7 @@ func deleteElevator(connectedElevTimers *map[string]*time.Timer, msg message.UDP
 	fmt.Println("deleting elevator :", msg.FromIP)
 }
 
-func masterThread(requestQueueKill chan bool, lightCommandChan chan elevManager.LightCommand, elevatorAddedChan chan string, elevatorRemovedChan chan string, NewMsgToMasterChan chan message.UDPMessage, NewOrderFromMasterChan chan message.UDPMessage, myIP string) {
+func masterThread(lightCommandChan chan elevManager.LightCommand, elevatorAddedChan chan string, elevatorRemovedChan chan string, NewMsgToMasterChan chan message.UDPMessage, NewOrderFromMasterChan chan message.UDPMessage, myIP string) {
 	numberOfelevators := 0
 	connectedElev := make(map[string]elevator)
 	master := true
@@ -259,7 +258,7 @@ func masterThread(requestQueueKill chan bool, lightCommandChan chan elevManager.
 			delete(connectedElev, elevatorIP)
 			//ask elevManager do delete queue externals
 			if elevatorIP == myIP {
-				requestQueueKill <- true
+
 				offline = true
 			}
 
@@ -308,22 +307,24 @@ func masterThread(requestQueueKill chan bool, lightCommandChan chan elevManager.
 			var IP string
 			var newOrder elevManager.OrderQueue
 
-			for i := 0; i < N_FLOORS; i++ {
-				newOrder.Internal[i] = msg.OrderQueue[i]
-				newOrder.Up[i] = msg.OrderQueue[(i + 4)]
-				newOrder.Down[i] = msg.OrderQueue[(i + 8)]
-
-			}
 			switch msg.MessageId {
 
 			case message.NewOrder:
+				for i := 0; i < N_FLOORS; i++ {
+					newOrder.Internal[i] = msg.OrderQueue[i]
+					newOrder.Up[i] = msg.OrderQueue[(i + 4)]
+					newOrder.Down[i] = msg.OrderQueue[(i + 8)]
+				}
+
+				fmt.Println("order recieved ", newOrder)
 				uniqueOrder := true
 				orderCost := MAX_ORDER_COST
 				if master && !offline {
 					for _, elev := range connectedElev {
 						if !elev.newOrder(newOrder) {
-							fmt.Println("old order")
+
 							uniqueOrder = false
+							fmt.Println("not unique")
 						}
 						tempOrderCost, tempIP := elev.cost(newOrder)
 						if tempOrderCost < orderCost {
@@ -331,6 +332,7 @@ func masterThread(requestQueueKill chan bool, lightCommandChan chan elevManager.
 							IP = tempIP
 						}
 					}
+
 					// this handles single elevator on network
 					if IP == "" {
 						msg.ToIP = IP
@@ -342,6 +344,7 @@ func masterThread(requestQueueKill chan bool, lightCommandChan chan elevManager.
 					//end of comment
 					//update masters copy of the queue
 					if uniqueOrder {
+						//fmt.Println("unique order, elev IP", IP)
 						for i := 0; i < N_FLOORS; i++ {
 							if newOrder.Up[i] == 1 {
 								elev = connectedElev[IP]
@@ -395,6 +398,7 @@ func masterThread(requestQueueKill chan bool, lightCommandChan chan elevManager.
 
 				if elev.queue.Up[elev.currentFloor] == 1 {
 					light = [3]int{0, elev.currentFloor, 0}
+					fmt.Println("turning up light of in floor", elev.currentFloor)
 					lightCommandChan <- light
 				}
 				if elev.queue.Down[elev.currentFloor] == 1 {

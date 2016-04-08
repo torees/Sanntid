@@ -5,6 +5,9 @@ import (
 	. "../internalOrders"
 	"../message"
 	"fmt"
+	"os"
+	//"os/exec"
+	"os/signal"
 	"time"
 )
 
@@ -122,7 +125,7 @@ func initializeElevator(positionChan chan int, requestStateUpdateChan chan bool)
 
 }
 
-func ElevManager(requestQueueKill chan bool, requestStateUpdateChan chan bool, lightCommandChan chan LightCommand, NewNetworkOrderFromSM chan OrderQueue, NewNetworkOrderToSM chan OrderQueue, stateUpdateFromSM chan message.UDPMessage) {
+func ElevManager(requestStateUpdateChan chan bool, lightCommandChan chan LightCommand, NewNetworkOrderFromSM chan OrderQueue, NewNetworkOrderToSM chan OrderQueue, stateUpdateFromSM chan message.UDPMessage) {
 
 	var queue OrderQueue
 
@@ -130,18 +133,22 @@ func ElevManager(requestQueueKill chan bool, requestStateUpdateChan chan bool, l
 	positionChan := make(chan int)
 	commandChan := make(chan Command, 100)
 	orderButtonChan := make(chan OrderQueue)
+	watchDogChan := make(chan bool)
 
 	//goroutines
 	go elevatorController(commandChan)
 	go ElevPosition(positionChan)
 	go CheckOrderButton(orderButtonChan)
 
-	queue.Internal = ReadInternals()
 	initializeElevator(positionChan, requestStateUpdateChan)
+	queue.Internal = ReadInternals()
+	elevWatchDog := time.AfterFunc(time.Second*10, func() { watchDogChan <- true })
 
-	//WriteInternals(order.Internal)
+	signalChan := make(chan os.Signal, 1)
+	signal.Notify(signalChan, os.Interrupt)
 
 	elevDir := up_dir
+	previousFloor := <-positionChan
 	defer driver.ElevStart(0)
 	var stateUpdate [2]int
 	for {
@@ -153,17 +160,18 @@ func ElevManager(requestQueueKill chan bool, requestStateUpdateChan chan bool, l
 					queue.Internal[i] = 1
 					order.Internal[i] = 1
 					driver.ButtonLamp(2, i, 1)
-
 					NewNetworkOrderFromSM <- order
 					break
 				}
 				if (orderButtonPushed.Up[i] != queue.Up[i]) && (orderButtonPushed.Up[i] == 1) {
 					order.Up[i] = 1
+					fmt.Println("sending order")
 					NewNetworkOrderFromSM <- order
 					break
 				}
 				if (orderButtonPushed.Down[i] != queue.Down[i]) && (orderButtonPushed.Down[i] == 1) {
 					order.Down[i] = 1
+					fmt.Println("sending order")
 					NewNetworkOrderFromSM <- order
 					break
 				}
@@ -186,10 +194,19 @@ func ElevManager(requestQueueKill chan bool, requestStateUpdateChan chan bool, l
 
 		case currentFloor := <-positionChan:
 			stateUpdate[0], stateUpdate[1] = int(elevDir), currentFloor
+
+			if currentFloor != previousFloor {
+				elevWatchDog.Reset(time.Second * 10)
+				previousFloor = currentFloor
+			}
 			if stopOnFloor(elevDir, currentFloor, &queue) == true {
 				commandChan <- stop
 				commandChan <- openDoor
 				requestStateUpdateChan <- true
+				//index: [0]: button [1]: floor [2] lightvalue
+
+				//lightCommandChan <- LightCommand{1, currentFloor, 0}
+				//lightCommandChan <- LightCommand{0, currentFloor, 0}
 
 			}
 			nextDir := nextDirection(&elevDir, &queue, currentFloor)
@@ -210,15 +227,16 @@ func ElevManager(requestQueueKill chan bool, requestStateUpdateChan chan bool, l
 			}
 			stateUpdateFromSM <- message.UDPMessage{OrderQueue: localqueue, ElevatorStateUpdate: stateUpdate}
 
-		case <-requestQueueKill:
-			emptyQueue := [driver.N_FLOORS]int{0, 0, 0, 0}
-			queue.Up = emptyQueue
-			queue.Down = emptyQueue
-			for floor := 0; floor < driver.N_FLOORS; floor++ {
-				driver.ButtonLamp(1, floor, 0)
-				driver.ButtonLamp(0, floor, 0)
+		case <-watchDogChan:
+			//Backup := exec.Command("gnome-terminal", "-x", "sh", "-c", "go run eventhandler.go")
+			//Backup.Run()
+			//os.Exit(0)
 
-			}
+		case <-signalChan:
+			driver.ElevStart(0)
+			fmt.Println("Software killed")
+			os.Exit(0)
+
 		}
 
 	}
@@ -274,11 +292,12 @@ func stopOnFloor(elevDir Direction, currentFloor int, queue *OrderQueue) bool {
 		}
 	}
 
-	if currentFloor == driver.BOTTOM_FLOOR || currentFloor == driver.TOP_FLOOR {
+	/*if currentFloor == driver.BOTTOM_FLOOR || currentFloor == driver.TOP_FLOOR {
 		return true
 	} else {
 		return false
-	}
+	}*/
+	return false
 
 }
 
