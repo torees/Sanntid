@@ -160,13 +160,13 @@ func main() { //function should be renamed afterwards, this is just for testing
 				var light elevManager.LightCommand
 				for i := 0; i < N_FLOORS; i++ {
 					if msg.OrderQueue[i+4] == 1 {
-						light = [3]int{0, i, 1}
+						light = [3]int{1, i, 1}
 						lightCommandChan <- light
 						break
 
 					}
 					if msg.OrderQueue[i+8] == 1 {
-						light = [3]int{1, i, 1}
+						light = [3]int{0, i, 1}
 						lightCommandChan <- light
 						break
 					}
