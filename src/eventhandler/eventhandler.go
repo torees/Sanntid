@@ -406,31 +406,51 @@ func masterThread(lightCommandChan chan elevManager.LightCommand, elevatorAddedC
 					elev.queue.Up[i] = msg.OrderQueue[i+8]
 				}
 
-				if elev.direction == 1 {
-					lightCommandChan <- elevManager.LightCommand{0, elev.currentFloor, 0}
-				}
-				if elev.direction == -1 {
-					lightCommandChan <- elevManager.LightCommand{1, elev.currentFloor, 0}
-				}
+				var lights elevManager.OrderQueue
+				for _, elevator := range connectedElev {
+					for floor := 0; floor < N_FLOORS; floor++ {
+						if elevator.queue.Up[floor] == 1 {
+							lights.Up[floor] = 1
+						}
+						if elevator.queue.Down[floor] == 1 {
+							lights.Down[floor] = 1
+						}
+					}
 
-				/*if elev.queue.Up[elev.currentFloor] == 1 {
-					light = [3]int{0, elev.currentFloor, 0}
-					fmt.Println("turning up light of in floor", elev.currentFloor)
-					lightCommandChan <- light
-				}
-				if elev.queue.Down[elev.currentFloor] == 1 {
-					light = [3]int{1, elev.currentFloor, 0}
-					fmt.Println("turning down light of in floor", elev.currentFloor)
-					lightCommandChan <- light
-				}*/
+					for floor := 0; floor < N_FLOORS; floor++ {
+						if lights.Up[floor] == 0 {
+							lightCommandChan <- elevManager.LightCommand{1, floor, 0}
+						}
+						if lights.Down[floor] == 0 {
+							lightCommandChan <- elevManager.LightCommand{0, floor, 0}
+						}
+					}
 
-				//elev.queue.Up[elev.currentFloor] = 0
-				//elev.queue.Down[elev.currentFloor] = 0
-				//elev.queue.Internal[elev.currentFloor] = 0
-				connectedElev[msg.FromIP] = elev
-				break
+					/*if elev.direction == 1 {
+						lightCommandChan <- elevManager.LightCommand{1, elev.currentFloor, 0}
+					}
+					if elev.direction == -1 {
+						lightCommandChan <- elevManager.LightCommand{0, elev.currentFloor, 0}
+					}*/
+
+					/*if elev.queue.Up[elev.currentFloor] == 1 {
+						light = [3]int{0, elev.currentFloor, 0}
+						fmt.Println("turning up light of in floor", elev.currentFloor)
+						lightCommandChan <- light
+					}
+					if elev.queue.Down[elev.currentFloor] == 1 {
+						light = [3]int{1, elev.currentFloor, 0}
+						fmt.Println("turning down light of in floor", elev.currentFloor)
+						lightCommandChan <- light
+					}*/
+
+					//elev.queue.Up[elev.currentFloor] = 0
+					//elev.queue.Down[elev.currentFloor] = 0
+					//elev.queue.Internal[elev.currentFloor] = 0
+					connectedElev[msg.FromIP] = elev
+					break
+				}
 			}
 		}
 	}
-
 }
