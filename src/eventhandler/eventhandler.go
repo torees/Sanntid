@@ -161,15 +161,17 @@ func main() { //function should be renamed afterwards, this is just for testing
 				for i := 0; i < N_FLOORS; i++ {
 					if msg.OrderQueue[i+4] == 1 {
 						light = [3]int{0, i, 1}
+						lightCommandChan <- light
 						break
 
 					}
 					if msg.OrderQueue[i+8] == 1 {
 						light = [3]int{1, i, 1}
+						lightCommandChan <- light
 						break
 					}
 				}
-				lightCommandChan <- light
+
 				///////////////////////////
 				// Make all copies update elevators queues
 				NewMsgToMasterChan <- msg
@@ -178,8 +180,8 @@ func main() { //function should be renamed afterwards, this is just for testing
 					var order elevManager.OrderQueue
 					for i := 0; i < 4; i++ {
 						order.Internal[i] = msg.OrderQueue[i]
-						order.Up[i] = msg.OrderQueue[(i + 4)]
-						order.Down[i] = msg.OrderQueue[(i + 8)]
+						order.Up[i] = msg.OrderQueue[(i + 8)]
+						order.Down[i] = msg.OrderQueue[(i + 4)]
 					}
 					NewNetworkOrderToSM <- order
 				}
@@ -192,8 +194,9 @@ func main() { //function should be renamed afterwards, this is just for testing
 			msg.FromIP = myIP
 			for i := 0; i < 4; i++ {
 				msg.OrderQueue[i] = order.Internal[i]
-				msg.OrderQueue[(i + 4)] = order.Up[i]
-				msg.OrderQueue[(i + 8)] = order.Down[i]
+				msg.OrderQueue[(i + 4)] = order.Down[i]
+				msg.OrderQueue[(i + 8)] = order.Up[i]
+
 			}
 			//calculate checksum?
 			if !offline {
@@ -312,8 +315,9 @@ func masterThread(lightCommandChan chan elevManager.LightCommand, elevatorAddedC
 			case message.NewOrder:
 				for i := 0; i < N_FLOORS; i++ {
 					newOrder.Internal[i] = msg.OrderQueue[i]
-					newOrder.Up[i] = msg.OrderQueue[(i + 4)]
-					newOrder.Down[i] = msg.OrderQueue[(i + 8)]
+					newOrder.Down[i] = msg.OrderQueue[(i + 4)]
+					newOrder.Up[i] = msg.OrderQueue[(i + 8)]
+
 				}
 
 				fmt.Println("order recieved ", newOrder)
@@ -403,6 +407,7 @@ func masterThread(lightCommandChan chan elevManager.LightCommand, elevatorAddedC
 				}
 				if elev.queue.Down[elev.currentFloor] == 1 {
 					light = [3]int{1, elev.currentFloor, 0}
+					fmt.Println("turning down light of in floor", elev.currentFloor)
 					lightCommandChan <- light
 				}
 				for i := 0; i < N_FLOORS; i++ {
