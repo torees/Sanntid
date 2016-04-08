@@ -202,11 +202,13 @@ func ElevManager(requestStateUpdateChan chan bool, lightCommandChan chan LightCo
 			if stopOnFloor(elevDir, currentFloor, &queue) == true {
 				commandChan <- stop
 				commandChan <- openDoor
-				requestStateUpdateChan <- true
-				//index: [0]: button [1]: floor [2] lightvalue
-
-				//lightCommandChan <- LightCommand{1, currentFloor, 0}
-				//lightCommandChan <- LightCommand{0, currentFloor, 0}
+				var localqueue [12]int
+				for i := 0; i < driver.N_FLOORS; i++ {
+					localqueue[i] = queue.Internal[i]
+					localqueue[i+4] = queue.Down[i]
+					localqueue[i+8] = queue.Up[i]
+				}
+				stateUpdateFromSM <- message.UDPMessage{OrderQueue: localqueue, ElevatorStateUpdate: stateUpdate}
 
 			}
 			nextDir := nextDirection(&elevDir, &queue, currentFloor)

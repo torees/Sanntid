@@ -395,12 +395,25 @@ func masterThread(lightCommandChan chan elevManager.LightCommand, elevatorAddedC
 				}
 
 			case message.ElevatorStateUpdate:
-				var light elevManager.LightCommand
+
 				elev = connectedElev[msg.FromIP]
 				elev.direction = msg.ElevatorStateUpdate[0]
 				elev.currentFloor = msg.ElevatorStateUpdate[1]
 
-				if elev.queue.Up[elev.currentFloor] == 1 {
+				for i := 0; i < N_FLOORS; i++ {
+					elev.queue.Internal[i] = msg.OrderQueue[i]
+					elev.queue.Down[i] = msg.OrderQueue[i+4]
+					elev.queue.Up[i] = msg.OrderQueue[i+8]
+				}
+
+				if elev.direction == 1 {
+					lightCommandChan <- elevManager.LightCommand{0, elev.currentFloor, 0}
+				}
+				if elev.direction == -1 {
+					lightCommandChan <- elevManager.LightCommand{1, elev.currentFloor, 0}
+				}
+
+				/*if elev.queue.Up[elev.currentFloor] == 1 {
 					light = [3]int{0, elev.currentFloor, 0}
 					fmt.Println("turning up light of in floor", elev.currentFloor)
 					lightCommandChan <- light
@@ -409,12 +422,7 @@ func masterThread(lightCommandChan chan elevManager.LightCommand, elevatorAddedC
 					light = [3]int{1, elev.currentFloor, 0}
 					fmt.Println("turning down light of in floor", elev.currentFloor)
 					lightCommandChan <- light
-				}
-				for i := 0; i < N_FLOORS; i++ {
-					elev.queue.Internal[i] = msg.OrderQueue[i]
-					elev.queue.Down[i] = msg.OrderQueue[i+4]
-					elev.queue.Up[i] = msg.OrderQueue[i+8]
-				}
+				}*/
 
 				//elev.queue.Up[elev.currentFloor] = 0
 				//elev.queue.Down[elev.currentFloor] = 0
