@@ -97,9 +97,12 @@ func UDPsend(conn *net.UDPConn, UDPSendMsgChan chan message.UDPMessage, IP strin
 			clientSend(conn, encodedPing)
 
 		case msg := <-UDPSendMsgChan:
+			/*if msg.MessageId == 4 {
+				fmt.Println("new UDP order:", msg.OrderQueue)
+			}*/
 			encodedMsg, _ := message.UDPMessageEncode(msg)
 			clientSend(conn, encodedMsg)
-			time.Sleep(time.Millisecond * 10)
+			time.Sleep(time.Millisecond)
 		case <-restartUDPSendChan:
 			return
 		}

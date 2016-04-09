@@ -165,13 +165,13 @@ func ElevManager(requestStateUpdateChan chan bool, lightCommandChan chan LightCo
 				}
 				if (orderButtonPushed.Up[i] != queue.Up[i]) && (orderButtonPushed.Up[i] == 1) {
 					order.Up[i] = 1
-					fmt.Println("sending order")
+					//fmt.Println("sending order")
 					NewNetworkOrderFromSM <- order
 					break
 				}
 				if (orderButtonPushed.Down[i] != queue.Down[i]) && (orderButtonPushed.Down[i] == 1) {
 					order.Down[i] = 1
-					fmt.Println("sending order")
+					//fmt.Println("sending order")
 					NewNetworkOrderFromSM <- order
 					break
 				}
@@ -218,7 +218,9 @@ func ElevManager(requestStateUpdateChan chan bool, lightCommandChan chan LightCo
 			}
 
 		case light := <-lightCommandChan:
+			//fmt.Println("new light command", light)
 			driver.ButtonLamp(driver.Button_type(light[0]), light[1], light[2])
+			//time.Sleep(time.Microsecond * 10)
 
 		case <-requestStateUpdateChan:
 			var localqueue [12]int
