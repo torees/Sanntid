@@ -12,7 +12,7 @@ import (
 	"time"
 )
 
-const MAX_ORDER_COST = 25
+const MAX_ORDER_COST = 75
 
 type elevator struct {
 	queue        elevManager.OrderQueue
@@ -27,7 +27,7 @@ func (elev elevator) cost(order elevManager.OrderQueue) (int, string) {
 	const dirCost = 2
 	const distCost = 4
 	const numOrderCost = 6
-	cost := 0
+	cost := 5
 
 	distanceCost := (elev.currentFloor - elev.findOrderFloor(order)) * distCost
 	directionCost := 0
@@ -38,8 +38,6 @@ func (elev elevator) cost(order elevManager.OrderQueue) (int, string) {
 	}
 
 	cost = elev.numOrdersInQueue()*numOrderCost + distanceCost + directionCost
-	//fmt.Println(cost, elev.IP, elev.queue)
-
 	return cost, elev.IP
 }
 
@@ -144,7 +142,6 @@ func main() { //function should be renamed afterwards, this is just for testing
 			}
 
 		case msg := <-NewOrderFromMasterChan:
-
 			UDPSendMsgChan <- msg
 
 		case msg := <-UDPMsgReceivedChan:
@@ -152,11 +149,12 @@ func main() { //function should be renamed afterwards, this is just for testing
 			// send udpmessage to correct routine
 			switch msg.MessageId {
 			case message.ElevatorStateUpdate, message.NewOrder:
-				fmt.Println("hello debuggin new order received on UDP")
 				NewMsgToMasterChan <- msg
 
 			case message.NewOrderFromMaster:
 				//tenn lys på n heiser
+				//fmt.Println("new order from master ", msg.OrderQueue)
+				//fmt.Println("kommer jeg forbi her")
 				var light elevManager.LightCommand
 				for i := 0; i < N_FLOORS; i++ {
 					if msg.OrderQueue[i+4] == 1 {
@@ -175,8 +173,12 @@ func main() { //function should be renamed afterwards, this is just for testing
 				///////////////////////////
 				// Make all copies update elevators queues
 				NewMsgToMasterChan <- msg
+				//fmt.Println("Will i pass this point?")
+				//fmt.Println("jeg kom forbi")
+				//fmt.Println("order IP:", msg.ToIP, "\n\n")
 				/////////////////////////////////////////////////////////
 				if msg.ToIP == myIP {
+
 					var order elevManager.OrderQueue
 					for i := 0; i < 4; i++ {
 						order.Internal[i] = msg.OrderQueue[i]
@@ -189,6 +191,7 @@ func main() { //function should be renamed afterwards, this is just for testing
 
 		case order := <-NewNetworkOrderFromSM:
 			//create UDP message and send via UDP
+			//fmt.Println("sending order: ", order)
 			var msg message.UDPMessage
 			msg.MessageId = message.NewOrder
 			msg.FromIP = myIP
@@ -306,7 +309,6 @@ func masterThread(lightCommandChan chan elevManager.LightCommand, elevatorAddedC
 			fmt.Println(IPlist)
 
 		case msg := <-NewMsgToMasterChan:
-
 			var IP string
 			var newOrder elevManager.OrderQueue
 
@@ -320,11 +322,12 @@ func masterThread(lightCommandChan chan elevManager.LightCommand, elevatorAddedC
 
 				}
 
-				fmt.Println("order recieved ", newOrder)
+				//fmt.Println("order recieved ", newOrder)
 				uniqueOrder := true
 				orderCost := MAX_ORDER_COST
 				if master && !offline {
 					for _, elev := range connectedElev {
+						//fmt.Println(elev)
 						if !elev.newOrder(newOrder) {
 
 							uniqueOrder = false
@@ -333,18 +336,16 @@ func masterThread(lightCommandChan chan elevManager.LightCommand, elevatorAddedC
 						tempOrderCost, tempIP := elev.cost(newOrder)
 						if tempOrderCost < orderCost {
 							orderCost = tempOrderCost
+							//fmt.Println("temp ip", tempIP)
 							IP = tempIP
 						}
 					}
-
-					// this handles single elevator on network
+					msg.ToIP = IP
 					if IP == "" {
-						msg.ToIP = IP
-						IP = myIP
-
-					} else {
-						msg.ToIP = IP
+						fmt.Println("error in assigning elevator, order deleted")
+						break
 					}
+
 					//end of comment
 					//update masters copy of the queue
 					if uniqueOrder {
@@ -361,7 +362,6 @@ func masterThread(lightCommandChan chan elevManager.LightCommand, elevatorAddedC
 								connectedElev[IP] = elev
 							}
 						}
-
 						msg.MessageId = message.NewOrderFromMaster
 						NewOrderFromMasterChan <- msg // send ON UDP
 					}
@@ -399,14 +399,17 @@ func masterThread(lightCommandChan chan elevManager.LightCommand, elevatorAddedC
 				elev = connectedElev[msg.FromIP]
 				elev.direction = msg.ElevatorStateUpdate[0]
 				elev.currentFloor = msg.ElevatorStateUpdate[1]
-
+				//fmt.Println("last queue : ", elev.queue)
 				for i := 0; i < N_FLOORS; i++ {
 					elev.queue.Internal[i] = msg.OrderQueue[i]
 					elev.queue.Down[i] = msg.OrderQueue[i+4]
 					elev.queue.Up[i] = msg.OrderQueue[i+8]
 				}
+				connectedElev[msg.FromIP] = elev
+				//fmt.Println("newQueue : ", elev.queue)
 
 				var lights elevManager.OrderQueue
+
 				for _, elevator := range connectedElev {
 					for floor := 0; floor < N_FLOORS; floor++ {
 						if elevator.queue.Up[floor] == 1 {
@@ -417,39 +420,41 @@ func masterThread(lightCommandChan chan elevManager.LightCommand, elevatorAddedC
 						}
 					}
 
-					for floor := 0; floor < N_FLOORS; floor++ {
-						if lights.Up[floor] == 0 {
-							lightCommandChan <- elevManager.LightCommand{1, floor, 0}
-						}
-						if lights.Down[floor] == 0 {
-							lightCommandChan <- elevManager.LightCommand{0, floor, 0}
-						}
-					}
-
-					/*if elev.direction == 1 {
-						lightCommandChan <- elevManager.LightCommand{1, elev.currentFloor, 0}
-					}
-					if elev.direction == -1 {
-						lightCommandChan <- elevManager.LightCommand{0, elev.currentFloor, 0}
-					}*/
-
-					/*if elev.queue.Up[elev.currentFloor] == 1 {
-						light = [3]int{0, elev.currentFloor, 0}
-						fmt.Println("turning up light of in floor", elev.currentFloor)
-						lightCommandChan <- light
-					}
-					if elev.queue.Down[elev.currentFloor] == 1 {
-						light = [3]int{1, elev.currentFloor, 0}
-						fmt.Println("turning down light of in floor", elev.currentFloor)
-						lightCommandChan <- light
-					}*/
-
-					//elev.queue.Up[elev.currentFloor] = 0
-					//elev.queue.Down[elev.currentFloor] = 0
-					//elev.queue.Internal[elev.currentFloor] = 0
-					connectedElev[msg.FromIP] = elev
-					break
 				}
+				//fmt.Println("lights UP: ", lights.Up, "lights down :", lights.Down)
+				for floor := 0; floor < N_FLOORS; floor++ {
+					if lights.Down[floor] == 0 && floor != BOTTOM_FLOOR {
+						lightCommandChan <- elevManager.LightCommand{1, floor, 0}
+					}
+					if lights.Up[floor] == 0 && floor != TOP_FLOOR {
+						lightCommandChan <- elevManager.LightCommand{0, floor, 0}
+					}
+				}
+
+				/*if elev.direction == 1 {
+					lightCommandChan <- elevManager.LightCommand{1, elev.currentFloor, 0}
+				}
+				if elev.direction == -1 {
+					lightCommandChan <- elevManager.LightCommand{0, elev.currentFloor, 0}
+				}*/
+
+				/*if elev.queue.Up[elev.currentFloor] == 1 {
+					light = [3]int{0, elev.currentFloor, 0}
+					fmt.Println("turning up light of in floor", elev.currentFloor)
+					lightCommandChan <- light
+				}
+				if elev.queue.Down[elev.currentFloor] == 1 {
+					light = [3]int{1, elev.currentFloor, 0}
+					fmt.Println("turning down light of in floor", elev.currentFloor)
+					lightCommandChan <- light
+				}*/
+
+				//elev.queue.Up[elev.currentFloor] = 0
+				//elev.queue.Down[elev.currentFloor] = 0
+				//elev.queue.Internal[elev.currentFloor] = 0
+
+				break
+
 			}
 		}
 	}
