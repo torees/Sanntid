@@ -377,25 +377,30 @@ func masterThread(lightCommandChan chan elevManager.LightCommand, elevatorAddedC
 				break
 
 			case message.NewOrderFromMaster:
+				for i := 0; i < N_FLOORS; i++ {
+					newOrder.Internal[i] = msg.OrderQueue[i]
+					newOrder.Down[i] = msg.OrderQueue[(i + 4)]
+					newOrder.Up[i] = msg.OrderQueue[(i + 8)]
+
+				}
 				if !master {
 					IP := msg.ToIP
-
+					fmt.Println(connectedElev[IP])
+					//fmt.Println(connectedElev, "\n")
+					elev = connectedElev[IP]
 					for i := 0; i < N_FLOORS; i++ {
 						if newOrder.Up[i] == 1 {
-							elev = connectedElev[IP]
 							elev.queue.Up[i] = 1
-							connectedElev[IP] = elev
 						}
 						if newOrder.Down[i] == 1 {
-							elev = connectedElev[IP]
 							elev.queue.Down[i] = 1
-							connectedElev[IP] = elev
 						}
 					}
+					connectedElev[IP] = elev
+					fmt.Println(elev)
 				}
 
 			case message.ElevatorStateUpdate:
-
 				elev = connectedElev[msg.FromIP]
 				elev.direction = msg.ElevatorStateUpdate[0]
 				elev.currentFloor = msg.ElevatorStateUpdate[1]
@@ -409,8 +414,8 @@ func masterThread(lightCommandChan chan elevManager.LightCommand, elevatorAddedC
 				//fmt.Println("newQueue : ", elev.queue)
 
 				var lights elevManager.OrderQueue
-
 				for _, elevator := range connectedElev {
+					//fmt.Println("heis :",elevator.queue
 					for floor := 0; floor < N_FLOORS; floor++ {
 						if elevator.queue.Up[floor] == 1 {
 							lights.Up[floor] = 1
