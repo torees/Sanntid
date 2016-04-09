@@ -243,9 +243,13 @@ func masterThread(lightCommandChan chan elevManager.LightCommand, elevatorAddedC
 	for {
 		select {
 		case elevatorIP := <-elevatorRemovedChan:
+			fmt.Println("elevator should be removed ",elevatorIP)
 			IPlist = IPlist[:0]
 			numberOfelevators -= 1
-
+			//get all orders external from elevatorIP and send internally
+			elev = connectedElev[elevatorIP]
+			tempqueue := elev.queue
+			delete(connectedElev, elevatorIP)
 			if numberOfelevators != 0 {
 				for key, _ := range connectedElev {
 					IPlist = append(IPlist, key)
@@ -258,10 +262,7 @@ func masterThread(lightCommandChan chan elevManager.LightCommand, elevatorAddedC
 				}
 			}
 			fmt.Println(IPlist)
-			//get all orders external from elevatorIP and send internally
-			elev = connectedElev[elevatorIP]
-			tempqueue := elev.queue
-			delete(connectedElev, elevatorIP)
+			
 			//ask elevManager do delete queue externals
 			if elevatorIP == myIP {
 
