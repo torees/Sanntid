@@ -109,7 +109,7 @@ func ElevManager(offline *bool, stateUpdateChan chan UDPMessage,requestStateUpda
 			if stopOnFloor(offline, hardwareErrorTimer,elevDir, currentFloor, &queue) {
 				commandChan <- stop
 				commandChan <- openDoor
-				queueUpdate:= AssembleQueueUpdate(queue)				
+				queueUpdate:= AssembleMessageQueue(queue)				
 				stateUpdateChan <- UDPMessage{OrderQueue: queueUpdate, ElevatorStateUpdate: stateUpdate}
 			}
 			
@@ -124,7 +124,7 @@ func ElevManager(offline *bool, stateUpdateChan chan UDPMessage,requestStateUpda
 
 
 		case <-requestStateUpdateChan:
-			queueUpdate:= AssembleQueueUpdate(queue)
+			queueUpdate:= AssembleMessageQueue(queue)
 			stateUpdateChan <- UDPMessage{OrderQueue: queueUpdate, ElevatorStateUpdate: stateUpdate}
 
 		case <-hardwareErrorChan:
@@ -217,7 +217,7 @@ func initializeElevator(positionChan chan int, requestStateUpdateChan chan bool)
 	requestStateUpdateChan <- true
 }
 
-func AssembleQueueUpdate(queue OrderQueue)[12]int{
+func AssembleMessageQueue(queue OrderQueue)[12]int{
 	var queueUpdate [12]int
 	for i := 0; i < N_FLOORS; i++ {
 		queueUpdate[i] = queue.Internal[i]
@@ -226,6 +226,17 @@ func AssembleQueueUpdate(queue OrderQueue)[12]int{
 	}
 	return queueUpdate
 }
+
+func DisassembleMessageQueue(msgQueue [12]int)OrderQueue{
+	var queue OrderQueue
+	for floor := 0; floor < N_FLOORS; floor++ {
+		queue.Internal[floor] = msgQueue[floor]
+		queue.Down[floor] = msgQueue[(floor + 4)]
+		queue.Up[floor] = msgQueue[(floor + 8)]
+	}
+	return queue
+}
+
 
 func removeFloorFromQueue(offline *bool,hardwareErrorTimer *time.Timer, currentFloor int, queue *OrderQueue) {
 	queue.Internal[currentFloor] = 0
@@ -350,3 +361,4 @@ func elevPosition(positionChan chan int) {
 		time.Sleep(time.Millisecond * 40)
 	}
 }
+
