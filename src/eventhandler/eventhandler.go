@@ -113,6 +113,7 @@ func main() { //function should be renamed afterwards, this is just for testing
 	lightCommandChan := make(chan elevManager.LightCommand, 100)
 	elevatorAddedChan := make(chan string, 100)
 	elevatorRemovedChan := make(chan string, 100)
+	networkStatus := make(chan bool, 100)
 
 	//Init sockets for sending ping and messages
 	UDPlistenConn := network.ServerConnectUDP()
@@ -121,7 +122,7 @@ func main() { //function should be renamed afterwards, this is just for testing
 	// Goroutines
 	go network.UDPlisten(UDPlistenConn, UDPPingReceivedChan, UDPMsgReceivedChan)
 	go network.CheckNetworkConnection(checkNetworkConChan)
-	go masterThread(lightCommandChan, elevatorAddedChan, elevatorRemovedChan, NewMsgToMasterChan, NewOrderFromMasterChan, myIP)
+	go masterThread(networkStatus, lightCommandChan, elevatorAddedChan, elevatorRemovedChan, NewMsgToMasterChan, NewOrderFromMasterChan, myIP)
 	go elevManager.ElevManager(requestStateUpdateChan, lightCommandChan, NewNetworkOrderFromSM, NewNetworkOrderToSM, stateUpdateFromSM)
 
 	connectedElevTimers := make(map[string]*time.Timer)
@@ -216,9 +217,12 @@ func main() { //function should be renamed afterwards, this is just for testing
 			if haveNetwork {
 				offline = false
 				network.StartUDPSend(UDPSendMsgChan, restartUDPSendChan, myIP)
+				networkStatus <- true
 			} else {
 				offline = true
 				restartUDPSendChan <- true
+				networkStatus <-false
+
 			}
 
 		}
@@ -233,7 +237,7 @@ func deleteElevator(connectedElevTimers *map[string]*time.Timer, msg message.UDP
 	fmt.Println("deleting elevator :", msg.FromIP)
 }
 
-func masterThread(lightCommandChan chan elevManager.LightCommand, elevatorAddedChan chan string, elevatorRemovedChan chan string, NewMsgToMasterChan chan message.UDPMessage, NewOrderFromMasterChan chan message.UDPMessage, myIP string) {
+func masterThread(networkStatus chan bool, lightCommandChan chan elevManager.LightCommand, elevatorAddedChan chan string, elevatorRemovedChan chan string, NewMsgToMasterChan chan message.UDPMessage, NewOrderFromMasterChan chan message.UDPMessage, myIP string) {
 	numberOfelevators := 0
 	connectedElev := make(map[string]elevator)
 	master := true
@@ -312,7 +316,7 @@ func masterThread(lightCommandChan chan elevManager.LightCommand, elevatorAddedC
 		case msg := <-NewMsgToMasterChan:
 			var IP string
 			var newOrder elevManager.OrderQueue
-
+			Msg:
 			switch msg.MessageId {
 
 			case message.NewOrder:
@@ -322,17 +326,16 @@ func masterThread(lightCommandChan chan elevManager.LightCommand, elevatorAddedC
 					newOrder.Up[i] = msg.OrderQueue[(i + 8)]
 
 				}
-
-				//fmt.Println("order recieved ", newOrder)
-				uniqueOrder := true
+				//uniqueOrder := true
 				orderCost := MAX_ORDER_COST
 				if master && !offline {
 					for _, elev := range connectedElev {
 						//fmt.Println(elev)
 						if !elev.newOrder(newOrder) {
 
-							uniqueOrder = false
+							//uniqueOrder = false
 							fmt.Println("not unique")
+							break Msg
 						}
 						tempOrderCost, tempIP := elev.cost(newOrder)
 						if tempOrderCost < orderCost {
@@ -347,25 +350,22 @@ func masterThread(lightCommandChan chan elevManager.LightCommand, elevatorAddedC
 						break
 					}
 
-					//end of comment
 					//update masters copy of the queue
-					if uniqueOrder {
 						//fmt.Println("unique order, elev IP", IP)
-						for i := 0; i < N_FLOORS; i++ {
-							if newOrder.Up[i] == 1 {
-								elev = connectedElev[IP]
-								elev.queue.Up[i] = 1
-								connectedElev[IP] = elev
-							}
-							if newOrder.Down[i] == 1 {
-								elev = connectedElev[IP]
-								elev.queue.Down[i] = 1
-								connectedElev[IP] = elev
-							}
+					for i := 0; i < N_FLOORS; i++ {
+						if newOrder.Up[i] == 1 {
+							elev = connectedElev[IP]
+							elev.queue.Up[i] = 1
+							connectedElev[IP] = elev
 						}
-						msg.MessageId = message.NewOrderFromMaster
-						NewOrderFromMasterChan <- msg // send ON UDP
+						if newOrder.Down[i] == 1 {
+							elev = connectedElev[IP]
+							elev.queue.Down[i] = 1
+							connectedElev[IP] = elev
+						}
 					}
+					msg.MessageId = message.NewOrderFromMaster
+					NewOrderFromMasterChan <- msg // send ON UDP
 
 				}
 				for i := 0; i < N_FLOORS; i++ {
@@ -460,8 +460,9 @@ func masterThread(lightCommandChan chan elevManager.LightCommand, elevatorAddedC
 				//elev.queue.Internal[elev.currentFloor] = 0
 
 				break
-
 			}
+		case <- networkStatus:
+				
 		}
 	}
 }

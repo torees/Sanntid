@@ -219,7 +219,7 @@ func ElevManager(requestStateUpdateChan chan bool, lightCommandChan chan LightCo
 
 		case light := <-lightCommandChan:
 			//fmt.Println("new light command", light)
-			fmt.Println("turning light off")
+			//fmt.Println("turning light off")
 			driver.ButtonLamp(driver.Button_type(light[0]), light[1], light[2])
 			//time.Sleep(time.Microsecond * 10)
 
