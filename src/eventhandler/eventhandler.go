@@ -5,22 +5,17 @@ import (
 	"../elevManager"
 	"../message"
 	. "../network"
+	. "../elevator"
 	"fmt"
-	"math"
 	"os"
 	"sort"
 	"time"
 	"os/signal"
 )
 
-const MAX_ORDER_COST = 100
 
-type elevator struct {
-	queue        elevManager.OrderQueue
-	direction    int
-	currentFloor int
-	IP           string
-}
+
+
 
 func main() { 
 	var myIP string
@@ -162,7 +157,7 @@ func deleteElevator(connectedElevTimers *map[string]*time.Timer, msg message.UDP
 	delete(*connectedElevTimers, msg.FromIP)
 }
 
-func isElevMaster(connectedElevMap map[string]elevator,myIP string)bool{
+func isElevMaster(connectedElevMap map[string]Elevator,myIP string)bool{
 	var IPlist []string
 	
 	for key, _ := range connectedElevMap {
@@ -183,19 +178,19 @@ func isElevMaster(connectedElevMap map[string]elevator,myIP string)bool{
 
 func master(offline *bool, newNetworkOrderToElevManagerChan chan elevManager.OrderQueue, networkStatus chan bool, setLightChan chan elevManager.LightCommand, elevatorAddedChan chan string, elevatorRemovedChan chan string,newMsgToMasterChan chan message.UDPMessage, newOrderFromMasterChan chan message.UDPMessage, myIP string) {
 	numberOfElev := 0
-	connectedElevMap := make(map[string]elevator)
+	connectedElevMap := make(map[string]Elevator)
 	isMaster := true
 	
 	
 
 	for {
-		var elev elevator
+		var elev Elevator
 		select {
 		
 		case elevatorIP := <-elevatorRemovedChan:
 			numberOfElev -= 1
 			elev = connectedElevMap[elevatorIP]
-			tempqueue := elev.queue
+			tempqueue := elev.Queue
 			delete(connectedElevMap, elevatorIP)			
 
 
@@ -244,10 +239,10 @@ func master(offline *bool, newNetworkOrderToElevManagerChan chan elevManager.Ord
 				orderCost := MAX_ORDER_COST
 				if isMaster && !*offline {
 					for _, elev = range connectedElevMap{
-						if !elev.newOrder(newOrder) {
+						if !elev.NewOrder(newOrder) {
 							break Msg
 						}
-						tempOrderCost, tempIP := elev.cost(newOrder)
+						tempOrderCost, tempIP := elev.Cost(newOrder)
 						if tempOrderCost < orderCost {
 							orderCost = tempOrderCost
 							IP = tempIP
@@ -260,12 +255,12 @@ func master(offline *bool, newNetworkOrderToElevManagerChan chan elevManager.Ord
 					for floor := 0; floor < N_FLOORS; floor++ {
 						if newOrder.Up[floor] == 1 {
 							elev = connectedElevMap[IP]
-							elev.queue.Up[floor] = 1
+							elev.Queue.Up[floor] = 1
 							connectedElevMap[IP] = elev
 						}
 						if newOrder.Down[floor] == 1 {
 							elev = connectedElevMap[IP]
-							elev.queue.Down[floor] = 1
+							elev.Queue.Down[floor] = 1
 							connectedElevMap[IP] = elev
 						}
 					}
@@ -276,7 +271,7 @@ func master(offline *bool, newNetworkOrderToElevManagerChan chan elevManager.Ord
 				for floor := 0; floor < N_FLOORS; floor++ {
 					if newOrder.Internal[floor] == 1 {
 						elev = connectedElevMap[msg.FromIP]
-						elev.queue.Internal[floor] = 1
+						elev.Queue.Internal[floor] = 1
 						connectedElevMap[msg.FromIP] = elev
 					}
 				}
@@ -290,10 +285,10 @@ func master(offline *bool, newNetworkOrderToElevManagerChan chan elevManager.Ord
 					elev = connectedElevMap[IP]
 					for floor := 0; floor < N_FLOORS; floor++ {
 						if newOrder.Up[floor] == 1 {
-							elev.queue.Up[floor] = 1
+							elev.Queue.Up[floor] = 1
 						}
 						if newOrder.Down[floor] == 1 {
-							elev.queue.Down[floor] = 1
+							elev.Queue.Down[floor] = 1
 						}
 					}
 					connectedElevMap[IP] = elev
@@ -301,19 +296,19 @@ func master(offline *bool, newNetworkOrderToElevManagerChan chan elevManager.Ord
 
 			case message.ElevatorStateUpdate:
 				elev = connectedElevMap[msg.FromIP]
-				elev.direction = msg.ElevatorStateUpdate[0]
-				elev.currentFloor = msg.ElevatorStateUpdate[1]				
-				elev.queue = elevManager.DisassembleMessageQueue(msg.OrderQueue)
+				elev.Direction = msg.ElevatorStateUpdate[0]
+				elev.CurrentFloor = msg.ElevatorStateUpdate[1]				
+				elev.Queue = elevManager.DisassembleMessageQueue(msg.OrderQueue)
 				
 				connectedElevMap[msg.FromIP] = elev
 
 				var lights elevManager.OrderQueue
 				for _, elevator := range connectedElevMap {
 					for floor := 0; floor < N_FLOORS; floor++ {
-						if elevator.queue.Up[floor] == 1 {
+						if elevator.Queue.Up[floor] == 1 {
 							lights.Up[floor] = 1
 						}
-						if elevator.queue.Down[floor] == 1 {
+						if elevator.Queue.Down[floor] == 1 {
 							lights.Down[floor] = 1
 						}
 					}
@@ -334,10 +329,10 @@ func master(offline *bool, newNetworkOrderToElevManagerChan chan elevManager.Ord
 				var order elevManager.OrderQueue
 				for _, elevator := range connectedElevMap{
 					for floor := 0; floor < N_FLOORS; floor++ {
-						if elevator.queue.Up[floor] == 1 {
+						if elevator.Queue.Up[floor] == 1 {
 							order.Up[floor] = 1
 						}
-						if elevator.queue.Down[floor] == 1 {
+						if elevator.Queue.Down[floor] == 1 {
 							order.Down[floor] = 1
 						}
 					}
@@ -351,61 +346,3 @@ func master(offline *bool, newNetworkOrderToElevManagerChan chan elevManager.Ord
 	}
 }
 
-
-
-func (elev elevator) cost(order elevManager.OrderQueue) (int, string) {
-	const dirCost = 2
-	const distCost = 4
-	const numOrderCost = 6
-	cost := 5
-
-	distanceCost := (elev.currentFloor - elev.findOrderFloor(order)) * distCost
-	directionCost := 0
-
-	if distanceCost < 0 {
-		directionCost = dirCost
-		distanceCost = int(math.Abs(float64(distanceCost)))
-	}
-
-	cost = elev.numOrdersInQueue()*numOrderCost + distanceCost + directionCost
-	return cost, elev.IP
-}
-
-func (elev elevator) findOrderFloor(order elevManager.OrderQueue) int {
-	for i := 0; i < N_FLOORS; i++ {
-		if order.Up[i] == 1 || order.Down[i] == 1 {
-			return i
-		}
-	}
-	return -1
-}
-
-func (elev elevator) numOrdersInQueue() int {
-	numOrders := 0
-	for i := 0; i < N_FLOORS; i++ {
-		if elev.queue.Up[i] == 1 {
-			numOrders += 1
-		}
-		if elev.queue.Down[i] == 1 {
-			numOrders += 1
-		}
-		if elev.queue.Internal[i] == 1 {
-			numOrders += 1
-		}
-	}
-	return numOrders
-}
-
-func (elev elevator) newOrder(order elevManager.OrderQueue) bool {
-
-	for floor := 0; floor < N_FLOORS; floor++ {
-		if elev.queue.Up[floor] == 1 && order.Up[floor] == 1 {
-			return false
-		}
-		if elev.queue.Down[floor] == 1 && order.Down[floor] == 1 {
-			return false
-		}
-
-	}
-	return true
-}
