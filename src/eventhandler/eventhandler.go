@@ -122,7 +122,7 @@ func main() { //function should be renamed afterwards, this is just for testing
 	// Goroutines
 	go network.UDPlisten(UDPlistenConn, UDPPingReceivedChan, UDPMsgReceivedChan)
 	go network.CheckNetworkConnection(checkNetworkConChan)
-	go masterThread(networkStatus, lightCommandChan, elevatorAddedChan, elevatorRemovedChan, NewMsgToMasterChan, NewOrderFromMasterChan, myIP)
+	go masterThread(NewNetworkOrderToSM,networkStatus, lightCommandChan, elevatorAddedChan, elevatorRemovedChan, NewMsgToMasterChan, NewOrderFromMasterChan, myIP)
 	go elevManager.ElevManager(requestStateUpdateChan, lightCommandChan, NewNetworkOrderFromSM, NewNetworkOrderToSM, stateUpdateFromSM)
 
 	connectedElevTimers := make(map[string]*time.Timer)
@@ -174,10 +174,6 @@ func main() { //function should be renamed afterwards, this is just for testing
 				///////////////////////////
 				// Make all copies update elevators queues
 				NewMsgToMasterChan <- msg
-				//fmt.Println("Will i pass this point?")
-				//fmt.Println("jeg kom forbi")
-				//fmt.Println("order IP:", msg.ToIP, "\n\n")
-				/////////////////////////////////////////////////////////
 				if msg.ToIP == myIP {
 
 					var order elevManager.OrderQueue
@@ -192,7 +188,6 @@ func main() { //function should be renamed afterwards, this is just for testing
 
 		case order := <-NewNetworkOrderFromSM:
 			//create UDP message and send via UDP
-			//fmt.Println("sending order: ", order)
 			var msg message.UDPMessage
 			msg.MessageId = message.NewOrder
 			msg.FromIP = myIP
@@ -237,7 +232,7 @@ func deleteElevator(connectedElevTimers *map[string]*time.Timer, msg message.UDP
 	fmt.Println("deleting elevator :", msg.FromIP)
 }
 
-func masterThread(networkStatus chan bool, lightCommandChan chan elevManager.LightCommand, elevatorAddedChan chan string, elevatorRemovedChan chan string, NewMsgToMasterChan chan message.UDPMessage, NewOrderFromMasterChan chan message.UDPMessage, myIP string) {
+func masterThread(NewNetworkOrderToSM chan elevManager.OrderQueue, networkStatus chan bool, lightCommandChan chan elevManager.LightCommand, elevatorAddedChan chan string, elevatorRemovedChan chan string,NewMsgToMasterChan chan message.UDPMessage, NewOrderFromMasterChan chan message.UDPMessage, myIP string) {
 	numberOfelevators := 0
 	connectedElev := make(map[string]elevator)
 	master := true
@@ -386,8 +381,6 @@ func masterThread(networkStatus chan bool, lightCommandChan chan elevManager.Lig
 				}
 				if !master {
 					IP := msg.ToIP
-					fmt.Println(connectedElev[IP])
-					//fmt.Println(connectedElev, "\n")
 					elev = connectedElev[IP]
 					for i := 0; i < N_FLOORS; i++ {
 						if newOrder.Up[i] == 1 {
@@ -398,7 +391,6 @@ func masterThread(networkStatus chan bool, lightCommandChan chan elevManager.Lig
 						}
 					}
 					connectedElev[IP] = elev
-					fmt.Println(elev)
 				}
 
 			case message.ElevatorStateUpdate:
@@ -436,33 +428,26 @@ func masterThread(networkStatus chan bool, lightCommandChan chan elevManager.Lig
 						lightCommandChan <- elevManager.LightCommand{0, floor, 0}
 					}
 				}
-
-				/*if elev.direction == 1 {
-					lightCommandChan <- elevManager.LightCommand{1, elev.currentFloor, 0}
-				}
-				if elev.direction == -1 {
-					lightCommandChan <- elevManager.LightCommand{0, elev.currentFloor, 0}
-				}*/
-
-				/*if elev.queue.Up[elev.currentFloor] == 1 {
-					light = [3]int{0, elev.currentFloor, 0}
-					fmt.Println("turning up light of in floor", elev.currentFloor)
-					lightCommandChan <- light
-				}
-				if elev.queue.Down[elev.currentFloor] == 1 {
-					light = [3]int{1, elev.currentFloor, 0}
-					fmt.Println("turning down light of in floor", elev.currentFloor)
-					lightCommandChan <- light
-				}*/
-
-				//elev.queue.Up[elev.currentFloor] = 0
-				//elev.queue.Down[elev.currentFloor] = 0
-				//elev.queue.Internal[elev.currentFloor] = 0
-
 				break
 			}
-		case <- networkStatus:
-				
+		case noNetwork := <- networkStatus:
+			if(noNetwork){
+				var order elevManager.OrderQueue
+				for _, elevator := range connectedElev {
+					for floor := 0; floor < N_FLOORS; floor++ {
+						if elevator.queue.Up[floor] == 1 {
+							order.Up[floor] = 1
+						}
+						if elevator.queue.Down[floor] == 1 {
+							order.Down[floor] = 1
+						}
+					}
+				}
+				NewNetworkOrderToSM <- order	
+			}
+
+
+
 		}
 	}
 }
