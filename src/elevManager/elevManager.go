@@ -128,6 +128,7 @@ func ElevManager(offline *bool, stateUpdateChan chan UDPMessage,requestStateUpda
 			stateUpdateChan <- UDPMessage{OrderQueue: queueUpdate, ElevatorStateUpdate: stateUpdate}
 
 		case <-hardwareErrorChan:
+			ElevStart(0)
 			fmt.Println("Hardware timeout")
 			os.Exit(0)	
 
