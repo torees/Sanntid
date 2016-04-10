@@ -118,15 +118,15 @@ func main() { //function should be renamed afterwards, this is just for testing
 	//Init sockets for sending ping and messages
 	UDPlistenConn := network.ServerConnectUDP()
 	network.StartUDPSend(UDPSendMsgChan, restartUDPSendChan, myIP)
-
+	offline := false
 	// Goroutines
 	go network.UDPlisten(UDPlistenConn, UDPPingReceivedChan, UDPMsgReceivedChan)
 	go network.CheckNetworkConnection(checkNetworkConChan)
 	go masterThread(NewNetworkOrderToSM,networkStatus, lightCommandChan, elevatorAddedChan, elevatorRemovedChan, NewMsgToMasterChan, NewOrderFromMasterChan, myIP)
-	go elevManager.ElevManager(requestStateUpdateChan, lightCommandChan, NewNetworkOrderFromSM, NewNetworkOrderToSM, stateUpdateFromSM)
+	go elevManager.ElevManager(&offline,requestStateUpdateChan, lightCommandChan, NewNetworkOrderFromSM, NewNetworkOrderToSM, stateUpdateFromSM)
 
 	connectedElevTimers := make(map[string]*time.Timer)
-	offline := false
+	
 	for {
 		select {
 		case msg := <-UDPPingReceivedChan:
