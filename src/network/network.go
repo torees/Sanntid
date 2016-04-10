@@ -1,8 +1,8 @@
 package network
 
 import (
-	"../driver"
-	"../message"
+	."../driver"
+	."../message"
 	"fmt"
 	"net"
 	"os"
@@ -14,32 +14,60 @@ const (
 	UDPPort = ":20011"
 )
 
+
+func CheckNetworkConnection(checkNetworkConChan chan bool) {
+	network := true
+	for {
+		ip := GetNetworkIP()
+		if ip == "::1" && network == true {
+			network = false
+			NetworkConnected(1)
+			checkNetworkConChan <- false
+
+		}
+		if (ip != "::1") && !network {
+			network = true
+			NetworkConnected(0)
+			checkNetworkConChan <- true
+		}
+
+	}
+}
+
+func GetNetworkIP() string {
+	ipAdd, _ := net.InterfaceAddrs()
+	ip := strings.Split(ipAdd[1].String(), "/")[0]
+	return ip
+}
+
+
 func ClientConnectUDP(port string) *net.UDPConn {
 	adress, err := net.ResolveUDPAddr("udp", "129.241.187.255"+port)
 	if err != nil {
-		fmt.Println(adress, err)
+		fmt.Println("Could not resolve adress. Shutting down")
+		os.Exit(0)
 	}
 
 	connection, err := net.DialUDP("udp", nil, adress)
-	if err == nil {
-		fmt.Println("Connection achieved at : ", adress)
+	if err != nil {
+		fmt.Println("Could not resolve socket. Shutting down")
+		os.Exit(0)
 	}
 	return connection
 }
 
 func ServerConnectUDP() *net.UDPConn {
-
 	adress, err := net.ResolveUDPAddr("udp", UDPPort)
 	if err != nil {
-		fmt.Println("Error: ", err)
+		fmt.Println("Could not resolve adress. Shutting down")
 		os.Exit(0)
-	}
+		}
 
 	connection, err := net.ListenUDP("udp", adress)
 	if err != nil {
-		fmt.Println("Error: ", err)
+		fmt.Println("Could not resolve socket. Shutting down")
 		os.Exit(0)
-	}
+		}
 	return connection
 
 }
@@ -54,42 +82,17 @@ func serverListenUDP(conn *net.UDPConn, buf []byte) int {
 
 }
 
-func CheckNetworkConnection(checkNetworkConChan chan bool) {
-	network := true
-	for {
-		ip := GetNetworkIP()
-		if ip == "::1" && network == true {
-			network = false
-			driver.NetworkConnect(1)
-			checkNetworkConChan <- false
-
-		}
-		if (ip != "::1") && !network {
-			network = true
-			driver.NetworkConnect(0)
-			checkNetworkConChan <- true
-		}
-
-	}
-}
-
-func GetNetworkIP() string {
-	ipAdd, _ := net.InterfaceAddrs()
-	ip := strings.Split(ipAdd[1].String(), "/")[0]
-	return ip
-}
-
-func StartUDPSend(UDPSendMsgChan chan message.UDPMessage, restartUDPSendChan chan bool, myIP string) {
+func StartUDPSend(UDPSendMsgChan chan UDPMessage, restartUDPSendChan chan bool, myIP string) {
 	UDPSendConn := ClientConnectUDP(UDPPort)
 	go UDPsend(UDPSendConn, UDPSendMsgChan, myIP, restartUDPSendChan)
 }
 
-func UDPsend(conn *net.UDPConn, UDPSendMsgChan chan message.UDPMessage, IP string, restartUDPSendChan chan bool) {
+func UDPsend(conn *net.UDPConn, UDPSendMsgChan chan UDPMessage, myIP string, restartUDPSendChan chan bool) {
 	defer conn.Close()
-	var ping message.UDPMessage
-	ping.FromIP = IP
-	ping.MessageId = message.Ping
-	encodedPing, _ := message.UDPMessageEncode(ping)
+	var ping UDPMessage
+	ping.FromIP = myIP
+	ping.MessageId = Ping
+	encodedPing, _ := UDPMessageEncode(ping)
 	ticker := time.NewTicker(time.Millisecond * 250).C
 	for {
 		select {
@@ -97,12 +100,10 @@ func UDPsend(conn *net.UDPConn, UDPSendMsgChan chan message.UDPMessage, IP strin
 			clientSend(conn, encodedPing)
 
 		case msg := <-UDPSendMsgChan:
-			/*if msg.MessageId == 4 {
-				fmt.Println("new UDP order:", msg.OrderQueue)
-			}*/
-			encodedMsg, _ := message.UDPMessageEncode(msg)
+			msg.Checksum = msg.CalculateChecksum()
+			encodedMsg, _ := UDPMessageEncode(msg)
 			clientSend(conn, encodedMsg)
-			time.Sleep(time.Millisecond)
+
 		case <-restartUDPSendChan:
 			return
 		}
@@ -110,26 +111,27 @@ func UDPsend(conn *net.UDPConn, UDPSendMsgChan chan message.UDPMessage, IP strin
 
 }
 
-func UDPlisten(conn *net.UDPConn, UDPPingReceivedChan chan message.UDPMessage, UDPMsgReceivedChan chan message.UDPMessage) {
+func UDPlisten(UDPPingReceivedChan chan UDPMessage, UDPMsgReceivedChan chan UDPMessage) {
+	var msg UDPMessage
+	conn := ServerConnectUDP()
 	defer conn.Close()
-	var msg message.UDPMessage
 	buf := make([]byte, 1024)
+
 	for {
 
 		numOfBytes := serverListenUDP(conn, buf)
-		msgBuffer := buf[0:numOfBytes]
-		message.UDPMessageDecode(&msg, msgBuffer)
+		msgBuf := buf[0:numOfBytes]
+		UDPMessageDecode(&msg, msgBuf)
 
 		switch msg.MessageId {
-		case message.Ping:
+		case Ping:
 			UDPPingReceivedChan <- msg
 			break
-		case message.NewOrderFromMaster, message.NewOrder, message.ElevatorStateUpdate:
-			UDPMsgReceivedChan <- msg
+		case NewOrderFromMaster, NewOrder, ElevatorStateUpdate:
+			if(msg.CalculateChecksum() == msg.Checksum){
+				UDPMsgReceivedChan <- msg
+			}
 			break
-			//Fault tolerance, shut down?
-
 		}
-
 	}
 }

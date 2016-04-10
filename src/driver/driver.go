@@ -12,11 +12,12 @@ import "C"
 type Elev_dir int
 type Button_type int
 
-const N_FLOORS = 4
-const BOTTOM_FLOOR = 0
-const TOP_FLOOR = 3
-const N_ELEVATORS = 3
-
+const (
+	N_FLOORS = 4
+	BOTTOM_FLOOR = 0
+	TOP_FLOOR = 3
+	N_ELEVATORS = 3
+)
 const (
 	DOWN Elev_dir = -1
 	STOP Elev_dir = 0
@@ -31,7 +32,7 @@ func ElevStart(dir Elev_dir) {
 	C.elev_set_motor_direction(C.elev_motor_direction_t(dir))
 }
 
-func NetworkConnect(value int) {
+func NetworkConnected(value int) {
 	C.elev_set_stop_lamp(C.int(value))
 }
 

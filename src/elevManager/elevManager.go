@@ -3,11 +3,9 @@ package elevManager
 import (
 	. "../driver"
 	. "../internalOrders"
-	"../message"
+	. "../message"
 	"fmt"
 	"os"
-	"os/exec"
-	"os/signal"
 	"time"
 )
 
@@ -32,14 +30,115 @@ type OrderQueue struct {
 	Up       [N_FLOORS]int
 }
 
-type LightCommand [3]int //index: [0]: button [1]: floor [2] lightvalue
+type LightCommand [3]int 
+func ElevManager(offline *bool, stateUpdateChan chan UDPMessage,requestStateUpdateChan chan bool, lightCommandChan chan LightCommand, NewNetworkOrderFromElevManagerChan chan OrderQueue, NewNetworkOrderToElevManagerChan chan OrderQueue) {
+
+	var queue OrderQueue
+	elevDir := up_dir
+	var stateUpdate [2]int
+
+
+	positionChan := make(chan int)
+	commandChan := make(chan Command, 100)
+	orderButtonChan := make(chan OrderQueue)
+	hardwareErrorChan := make(chan bool)
+	
+
+	go elevatorController(commandChan)
+	go elevPosition(positionChan)
+	go checkOrderButton(orderButtonChan)
+
+	initializeElevator(positionChan, requestStateUpdateChan)
+	queue.Internal = ReadInternals()
+	hardwareErrorTimer := time.AfterFunc(time.Second*10, func() { hardwareErrorChan <- true })
+	hardwareErrorTimer.Stop()
+	
+
+	for {
+		
+		select {
+
+		case orderButtonPushed := <-orderButtonChan:
+			var order OrderQueue
+			for floor := 0; floor < N_FLOORS; floor++ {
+				if (orderButtonPushed.Internal[floor] != queue.Internal[floor]) && (orderButtonPushed.Internal[floor] == 1) {
+					queue.Internal[floor] = 1
+					order.Internal[floor] = 1
+					ButtonLamp(2, floor, 1)
+					WriteInternalToFile(queue.Internal)
+					NewNetworkOrderFromElevManagerChan <- order
+					hardwareErrorTimer.Reset(time.Second * 30)
+					break
+				}
+				if (orderButtonPushed.Up[floor] != queue.Up[floor]) && (orderButtonPushed.Up[floor] == 1) {
+					order.Up[floor] = 1
+					NewNetworkOrderFromElevManagerChan <- order
+					break
+				}
+				if (orderButtonPushed.Down[floor] != queue.Down[floor]) && (orderButtonPushed.Down[floor] == 1) {
+					order.Down[floor] = 1
+					NewNetworkOrderFromElevManagerChan <- order
+					break
+				}
+
+			}
+			
+
+		case neworder := <-NewNetworkOrderToElevManagerChan:
+			for floor := 0; floor < N_FLOORS; floor++ {
+				if neworder.Up[floor] == 1 {
+					queue.Up[floor] = 1
+					ButtonLamp(0, floor, 1)
+				}
+				if neworder.Down[floor] == 1 {
+					queue.Down[floor] = 1
+					ButtonLamp(1, floor, 1)
+				}
+			}
+			hardwareErrorTimer.Reset(time.Second * 30)
+			
+
+		case currentFloor := <-positionChan:
+			stateUpdate[0], stateUpdate[1] = int(elevDir), currentFloor
+			if currentFloor == 3 {
+				elevDir = down_dir
+			} else if currentFloor == 0 {
+				elevDir = up_dir
+			}
+
+			if stopOnFloor(offline, hardwareErrorTimer,elevDir, currentFloor, &queue) {
+				commandChan <- stop
+				commandChan <- openDoor
+				queueUpdate:= AssembleQueueUpdate(queue)				
+				stateUpdateChan <- UDPMessage{OrderQueue: queueUpdate, ElevatorStateUpdate: stateUpdate}
+			}
+			
+			nextCmd := nextCommand(&elevDir, &queue, currentFloor)
+			if nextCmd != stop {
+				commandChan <- nextCmd
+			}
+
+
+		case light := <-lightCommandChan:
+			ButtonLamp(Button_type(light[0]), light[1], light[2])
+
+
+		case <-requestStateUpdateChan:
+			queueUpdate:= AssembleQueueUpdate(queue)
+			stateUpdateChan <- UDPMessage{OrderQueue: queueUpdate, ElevatorStateUpdate: stateUpdate}
+
+		case <-hardwareErrorChan:
+			fmt.Println("Hardware timeout")
+			os.Exit(0)	
+
+		}
+	}
+}
 
 func elevatorController(commandChan chan Command) {
 	doorOpen := false
 	doorTimeoutChan := make(chan bool)
 	doorTimer := time.AfterFunc(time.Second*3, func() { doorTimeoutChan <- true })
-
-	//legge inn fault tolerance ved manuell flytting av heis? Timer på ny command, restart ved timeout
 
 	for {
 		select {
@@ -65,7 +164,7 @@ func elevatorController(commandChan chan Command) {
 				}
 				break
 			default:
-				//fault tolerance?
+				
 			}
 		case <-doorTimeoutChan:
 			DoorOpen(0)
@@ -74,12 +173,8 @@ func elevatorController(commandChan chan Command) {
 	}
 }
 
-func nextDirection(elevDir *Direction, queue *OrderQueue, currentFloor int) Command {
-	if currentFloor == 3 {
-		*elevDir = down_dir
-	} else if currentFloor == 0 {
-		*elevDir = up_dir
-	}
+func nextCommand(elevDir *Direction, queue *OrderQueue, currentFloor int) Command {
+	
 
 	if *elevDir == up_dir {
 		for i := currentFloor + 1; i < N_FLOORS; i++ {
@@ -111,197 +206,69 @@ func nextDirection(elevDir *Direction, queue *OrderQueue, currentFloor int) Comm
 		}
 	}
 	return stop
-
 }
 
 func initializeElevator(positionChan chan int, requestStateUpdateChan chan bool) {
 	HardwareInit()
 	fmt.Println("Starting Elevator 3000...")
-	ElevStart(1)
-	<-positionChan
+	ElevStart(1)	
+	fmt.Println("Initialized at floor", <-positionChan)
 	ElevStart(0)
-	fmt.Println("Initialized at floor", <-positionChan+1)
 	requestStateUpdateChan <- true
-
 }
 
-func ElevManager(offline *bool,requestStateUpdateChan chan bool, lightCommandChan chan LightCommand, NewNetworkOrderFromSM chan OrderQueue, NewNetworkOrderToSM chan OrderQueue, stateUpdateFromSM chan message.UDPMessage) {
-
-	var queue OrderQueue
-
-	//channels
-	positionChan := make(chan int)
-	commandChan := make(chan Command, 100)
-	orderButtonChan := make(chan OrderQueue)
-	watchDogChan := make(chan bool)
-
-	//goroutines
-	go elevatorController(commandChan)
-	go ElevPosition(positionChan)
-	go CheckOrderButton(orderButtonChan)
-
-	initializeElevator(positionChan, requestStateUpdateChan)
-	queue.Internal = ReadInternals()
-	elevWatchDog := time.AfterFunc(time.Second*10, func() { watchDogChan <- true })
-	elevWatchDog.Stop()
-
-	signalChan := make(chan os.Signal, 1)
-	signal.Notify(signalChan, os.Interrupt)
-
-	elevDir := up_dir
-	//previousFloor := <-positionChan
-	defer ElevStart(0)
-	var stateUpdate [2]int
-	for {
-		var order OrderQueue
-		select {
-		case orderButtonPushed := <-orderButtonChan:
-			for i := 0; i < N_FLOORS; i++ {
-				if (orderButtonPushed.Internal[i] != queue.Internal[i]) && (orderButtonPushed.Internal[i] == 1) {
-					queue.Internal[i] = 1
-					order.Internal[i] = 1
-					ButtonLamp(2, i, 1)
-					NewNetworkOrderFromSM <- order
-					elevWatchDog.Reset(time.Second * 30)
-					break
-				}
-				if (orderButtonPushed.Up[i] != queue.Up[i]) && (orderButtonPushed.Up[i] == 1) {
-					order.Up[i] = 1
-					//fmt.Println("sending order")
-					NewNetworkOrderFromSM <- order
-					break
-				}
-				if (orderButtonPushed.Down[i] != queue.Down[i]) && (orderButtonPushed.Down[i] == 1) {
-					order.Down[i] = 1
-					//fmt.Println("sending order")
-					NewNetworkOrderFromSM <- order
-					break
-				}
-
-			}
-			WriteInternals(queue.Internal)
-
-		case neworder := <-NewNetworkOrderToSM:
-			for i := 0; i < N_FLOORS; i++ {
-				if neworder.Up[i] == 1 {
-					queue.Up[i] = 1
-					ButtonLamp(0, i, 1)
-				}
-				if neworder.Down[i] == 1 {
-					queue.Down[i] = 1
-					ButtonLamp(1, i, 1)
-				}
-			}
-			elevWatchDog.Reset(time.Second * 30)
-			break
-
-		case currentFloor := <-positionChan:
-			stateUpdate[0], stateUpdate[1] = int(elevDir), currentFloor
-
-			/*if currentFloor != previousFloor {
-				elevWatchDog.Reset(time.Second * 10)
-				previousFloor = currentFloor
-			}*/
-			//elevWatchDog.Reset(time.Second * 10)
-
-			if stopOnFloor(offline, elevWatchDog,elevDir, currentFloor, &queue) == true {
-				commandChan <- stop
-				commandChan <- openDoor
-				var localqueue [12]int
-				for i := 0; i < N_FLOORS; i++ {
-					localqueue[i] = queue.Internal[i]
-					localqueue[i+4] = queue.Down[i]
-					localqueue[i+8] = queue.Up[i]
-				}
-				stateUpdateFromSM <- message.UDPMessage{OrderQueue: localqueue, ElevatorStateUpdate: stateUpdate}
-
-			}
-			nextDir := nextDirection(&elevDir, &queue, currentFloor)
-
-			if nextDir != stop {
-				commandChan <- nextDir
-			}
-
-		case light := <-lightCommandChan:
-			//fmt.Println("new light command", light)
-			//fmt.Println("turning light off")
-			ButtonLamp(Button_type(light[0]), light[1], light[2])
-			//time.Sleep(time.Microsecond * 10)
-
-		case <-requestStateUpdateChan:
-			var localqueue [12]int
-			for i := 0; i < N_FLOORS; i++ {
-				localqueue[i] = queue.Internal[i]
-				localqueue[i+4] = queue.Down[i]
-				localqueue[i+8] = queue.Up[i]
-			}
-			stateUpdateFromSM <- message.UDPMessage{OrderQueue: localqueue, ElevatorStateUpdate: stateUpdate}
-
-		case <-watchDogChan:
-			Backup := exec.Command("gnome-terminal", "-x", "sh", "-c", "go run eventhandler.go")
-			Backup.Run()
-			fmt.Println("Hardware timeout")
-			os.Exit(0)
-
-		// flytt til eventhandler
-		case <-signalChan:
-			ElevStart(0)
-			fmt.Println("Software killed")
-			os.Exit(0)
-
-		}
-
+func AssembleQueueUpdate(queue OrderQueue)[12]int{
+	var queueUpdate [12]int
+	for i := 0; i < N_FLOORS; i++ {
+		queueUpdate[i] = queue.Internal[i]
+		queueUpdate[i+4] = queue.Down[i]
+		queueUpdate[i+8] = queue.Up[i]
 	}
-
+	return queueUpdate
 }
-func removeFloorFromQueue(offline *bool,elevWatchDog *time.Timer, currentFloor int, queue *OrderQueue) {
+
+func removeFloorFromQueue(offline *bool,hardwareErrorTimer *time.Timer, currentFloor int, queue *OrderQueue) {
 	queue.Internal[currentFloor] = 0
 	queue.Up[currentFloor] = 0
 	queue.Down[currentFloor] = 0
 	ButtonLamp(2, currentFloor, 0)
-	WriteInternals(queue.Internal)
-	i:=0
+	WriteInternalToFile(queue.Internal)
+	emptyQueue:=true
 	for floor := 0; floor < N_FLOORS; floor++ {
 		if queue.Up[floor] == 0 && floor != BOTTOM_FLOOR  && *offline{
-				ButtonLamp(1,currentFloor,0)
-			}else if queue.Up[floor] ==1{
-				i++
+			ButtonLamp(1,currentFloor,0)
 			}
 		if queue.Down[floor] == 0 && floor != TOP_FLOOR && *offline{
-			ButtonLamp(0,floor,0)
-			}else if queue.Up[floor] ==1{
-				i++
+			ButtonLamp(0,currentFloor,0)
 			}
 	
-		if queue.Internal[floor] ==1{
-				i++
+		if queue.Internal[floor] ==1 || queue.Up[floor] ==1 ||queue.Down[floor] ==1{
+				emptyQueue=false
 			}
 		}
-	if i==0{
-			fmt.Println("stopping watchdog")
-			elevWatchDog.Stop()
+	if emptyQueue{
+			hardwareErrorTimer.Stop()
 		}
-
 }
 
-func stopOnFloor(offline * bool, elevWatchDog *time.Timer, elevDir Direction, currentFloor int, queue *OrderQueue) bool {
+func stopOnFloor(offline * bool, hardwareErrorTimer *time.Timer, elevDir Direction, currentFloor int, queue *OrderQueue) bool {
 	if currentFloor == TOP_FLOOR && queue.Down[currentFloor] == 1 || currentFloor == BOTTOM_FLOOR && queue.Up[currentFloor] == 1 {
-		removeFloorFromQueue(offline,elevWatchDog, currentFloor, queue)
+		removeFloorFromQueue(offline,hardwareErrorTimer, currentFloor, queue)
 		return true
 	}
 	if queue.Internal[currentFloor] == 1 {
-			removeFloorFromQueue(offline,elevWatchDog, currentFloor, queue)
+			removeFloorFromQueue(offline,hardwareErrorTimer, currentFloor, queue)
 		return true
 	}
 	if elevDir == up_dir {
 		if queue.Up[currentFloor] == 1 {
-			removeFloorFromQueue(offline,elevWatchDog, currentFloor, queue)
+			removeFloorFromQueue(offline,hardwareErrorTimer, currentFloor, queue)
 			return true
 		}
 
 	} else {
 		if queue.Down[currentFloor] == 1 {
-			removeFloorFromQueue(offline,elevWatchDog, currentFloor, queue)
+			removeFloorFromQueue(offline,hardwareErrorTimer, currentFloor, queue)
 			return true
 		}
 	}
@@ -311,7 +278,7 @@ func stopOnFloor(offline * bool, elevWatchDog *time.Timer, elevDir Direction, cu
 			if queue.Up[i] == 1 || queue.Internal[i] == 1 || queue.Down[i] == 1 {
 				return false
 			} else if queue.Down[currentFloor] == 1 {
-			removeFloorFromQueue(offline,elevWatchDog, currentFloor, queue)
+			removeFloorFromQueue(offline,hardwareErrorTimer, currentFloor, queue)
 				return true
 			}
 		}
@@ -320,16 +287,15 @@ func stopOnFloor(offline * bool, elevWatchDog *time.Timer, elevDir Direction, cu
 			if queue.Up[i] == 1 || queue.Internal[i] == 1 || queue.Down[i] == 1 {
 				return false
 			} else if queue.Up[currentFloor] == 1 {
-			removeFloorFromQueue(offline,elevWatchDog, currentFloor, queue)
+			removeFloorFromQueue(offline,hardwareErrorTimer, currentFloor, queue)
 				return true
 			}
 		}
 	}
 	return false
-
 }
 
-func CheckOrderButton(orderButtonChan chan OrderQueue) {
+func checkOrderButton(orderButtonChan chan OrderQueue) {
 
 	var prevbuttonsPressed OrderQueue
 
@@ -374,7 +340,7 @@ func CheckOrderButton(orderButtonChan chan OrderQueue) {
 	}
 }
 
-func ElevPosition(positionChan chan int) {
+func elevPosition(positionChan chan int) {
 	for {
 		floor := FloorSensor()
 		if floor != -1 {
@@ -383,5 +349,4 @@ func ElevPosition(positionChan chan int) {
 		}
 		time.Sleep(time.Millisecond * 40)
 	}
-
 }

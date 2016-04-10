@@ -16,8 +16,8 @@ type UDPMessage struct {
 	MessageId           int
 	FromIP              string
 	ToIP                string
-	OrderQueue          [12]int //[0] internal [4] Down [8] Up
-	ElevatorStateUpdate [2]int  // [0] = direction, [1] = position
+	OrderQueue          [12]int //[0-3] Internal, [4-7] Down, [8-11] Up
+	ElevatorStateUpdate [2]int  // [0] Direction, [1] Position
 	Checksum            int
 }
 
@@ -29,7 +29,7 @@ func UDPMessageDecode(Msg *UDPMessage, UDParray []byte) {
 	json.Unmarshal(UDParray, Msg)
 }
 
-func CalculateChecksum(Msg *UDPMessage) int { // not a very good crc, just for testing
-	c := Msg.MessageId%7 + Msg.OrderQueue[0]%7 + Msg.ElevatorStateUpdate[0]%7
+func (msg UDPMessage) CalculateChecksum() int {
+	c := msg.MessageId%7 + msg.OrderQueue[0]%7 + msg.ElevatorStateUpdate[0]%7
 	return c
 }

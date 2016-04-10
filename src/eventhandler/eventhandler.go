@@ -4,15 +4,16 @@ import (
 	. "../driver"
 	"../elevManager"
 	"../message"
-	"../network"
+	. "../network"
 	"fmt"
 	"math"
 	"os"
 	"sort"
 	"time"
+	"os/signal"
 )
 
-const MAX_ORDER_COST = 75
+const MAX_ORDER_COST = 100
 
 type elevator struct {
 	queue        elevManager.OrderQueue
@@ -21,9 +22,364 @@ type elevator struct {
 	IP           string
 }
 
+func main() { 
+	var myIP string
+	for {
+		myIP = GetNetworkIP()
+		if !(myIP == "::1") {
+			break
+		}
+		fmt.Println("No connection")
+		time.Sleep(time.Second * 1)
+	}
+	NetworkConnected(0)
+	offline := false
+
+	UDPSendMsgChan := make(chan message.UDPMessage, 100)
+	UDPPingReceivedChan := make(chan message.UDPMessage, 100)
+	UDPMsgReceivedChan := make(chan message.UDPMessage, 100)
+	restartUDPSendChan := make(chan bool)
+	checkNetworkConChan := make(chan bool)
+	
+
+	newNetworkOrderToElevManagerChan := make(chan elevManager.OrderQueue, 100)
+	newNetworkOrderFromElevManagerChan := make(chan elevManager.OrderQueue, 100)
+	stateUpdateChan := make(chan message.UDPMessage, 100)
+	requestStateUpdateChan := make(chan bool, 100)
+
+	newMsgToMasterChan := make(chan message.UDPMessage, 100)
+	newOrderFromMasterChan := make(chan message.UDPMessage, 100)
+	setLightChan := make(chan elevManager.LightCommand, 100)
+	elevatorAddedChan := make(chan string, 100)
+	elevatorRemovedChan := make(chan string, 100)
+	networkStatus := make(chan bool, 100)
+	keyboardInterruptChan := make(chan os.Signal)
+
+
+	StartUDPSend(UDPSendMsgChan, restartUDPSendChan, myIP)
+
+	go UDPlisten(UDPPingReceivedChan, UDPMsgReceivedChan)
+	go CheckNetworkConnection(checkNetworkConChan)
+	go master(&offline,newNetworkOrderToElevManagerChan,networkStatus, setLightChan, elevatorAddedChan, elevatorRemovedChan, newMsgToMasterChan, newOrderFromMasterChan, myIP)
+	go elevManager.ElevManager(&offline,stateUpdateChan,requestStateUpdateChan, setLightChan, newNetworkOrderFromElevManagerChan, newNetworkOrderToElevManagerChan )
+
+	connectedElevTimers := make(map[string]*time.Timer)
+	signal.Notify(keyboardInterruptChan, os.Interrupt) //Catch keyboard interrupts (Ctrl+C)	
+	
+	for {
+		select {
+		case msg := <-UDPPingReceivedChan:
+			_, exists := connectedElevTimers[msg.FromIP]
+			if exists {
+				connectedElevTimers[msg.FromIP].Reset(time.Second)
+			} else {
+				elevatorAddedChan <- msg.FromIP
+				connectedElevTimers[msg.FromIP] = time.AfterFunc(time.Millisecond*600, func() { deleteElevator(&connectedElevTimers, msg, elevatorRemovedChan) })
+				requestStateUpdateChan <- true
+			}
+
+		case msg := <-newOrderFromMasterChan:
+			UDPSendMsgChan <- msg
+
+		case msg := <-UDPMsgReceivedChan:
+
+			switch msg.MessageId {
+			case message.ElevatorStateUpdate, message.NewOrder:
+				newMsgToMasterChan <- msg
+
+			case message.NewOrderFromMaster:
+				//Light external orderbuttons for all connected elevators
+				var light elevManager.LightCommand
+				for i := 0; i < N_FLOORS; i++ {
+					if msg.OrderQueue[i+4] == 1 {
+						light = [3]int{1, i, 1}
+						setLightChan <- light
+						break
+
+					}
+					if msg.OrderQueue[i+8] == 1 {
+						light = [3]int{0, i, 1}
+						setLightChan <- light
+						break
+					}
+				}
+
+				// Make all connected elevators update copies of order queues
+				newMsgToMasterChan <- msg
+
+				if msg.ToIP == myIP {
+					var order elevManager.OrderQueue
+					for i := 0; i < 4; i++ {
+						order.Internal[i] = msg.OrderQueue[i]
+						order.Up[i] = msg.OrderQueue[(i + 8)]
+						order.Down[i] = msg.OrderQueue[(i + 4)]
+					}
+					newNetworkOrderToElevManagerChan <- order
+				}
+			}
+
+		case order := <-newNetworkOrderFromElevManagerChan:
+			if !offline {
+				var msg message.UDPMessage
+				msg.MessageId = message.NewOrder
+				msg.FromIP = myIP
+				msg.OrderQueue = elevManager.AssembleQueueUpdate(order)			
+				UDPSendMsgChan <- msg
+			}
+
+
+		case msg := <-stateUpdateChan:
+			if !offline {
+				msg.MessageId = message.ElevatorStateUpdate
+				msg.FromIP = myIP			
+				UDPSendMsgChan <- msg
+			}
+
+		case haveNetwork := <-checkNetworkConChan:
+			if haveNetwork {
+				offline = false
+				StartUDPSend(UDPSendMsgChan, restartUDPSendChan, myIP)
+				networkStatus <- true
+			} else {
+				offline = true
+				restartUDPSendChan <- true
+				networkStatus <-false
+			}
+
+		case <-keyboardInterruptChan:
+			ElevStart(0)
+			fmt.Println("Software killed by user")
+			os.Exit(0)
+
+		}
+
+	}
+
+}
+
+func deleteElevator(connectedElevTimers *map[string]*time.Timer, msg message.UDPMessage, elevatorRemovedChan chan string) {
+	elevatorRemovedChan <- msg.FromIP
+	delete(*connectedElevTimers, msg.FromIP)
+}
+
+func master(offline *bool, newNetworkOrderToElevManagerChan chan elevManager.OrderQueue, networkStatus chan bool, setLightChan chan elevManager.LightCommand, elevatorAddedChan chan string, elevatorRemovedChan chan string,newMsgToMasterChan chan message.UDPMessage, newOrderFromMasterChan chan message.UDPMessage, myIP string) {
+	numberOfElev := 0
+	connectedElevMap := make(map[string]elevator)
+	isMaster := true
+	var IPlist []string
+	var elev elevator
+
+	for {
+		select {
+		
+		case elevatorIP := <-elevatorRemovedChan:
+			IPlist = IPlist[:0]
+			numberOfElev -= 1
+			elev = connectedElevMap[elevatorIP]
+			tempqueue := elev.queue
+			delete(connectedElevMap, elevatorIP)
+			if numberOfElev != 0 {
+				for key, _ := range connectedElevMap {
+					IPlist = append(IPlist, key)
+				}
+				sort.Strings(IPlist)
+				if IPlist[0] == myIP {
+					isMaster = true
+				
+				} else {
+					isMaster = false
+				}
+			}
+			fmt.Println("Currently connected Elevators: ", IPlist)
+			
+
+			/*if numberOfElev == 0 {
+				isMaster = true
+			}*/
+			var msg message.UDPMessage
+			msg.MessageId = message.NewOrder
+			msg.FromIP = myIP
+			for floor := 0; floor < N_FLOORS; floor++ {
+				if tempqueue.Up[floor] == 1 {
+					msg.OrderQueue[floor+8] = 1
+					newMsgToMasterChan <- msg
+				}
+				if tempqueue.Down[floor] == 1 {
+					msg.OrderQueue[floor+4] = 1
+					newMsgToMasterChan <- msg
+				}
+			}
+
+		case id := <-elevatorAddedChan:
+			numberOfElev += 1
+			*offline = false
+			if numberOfElev > N_ELEVATORS {
+				//fault tolerance
+				fmt.Println("To many elevators")
+				os.Exit(0)
+			}
+
+			elev.IP = id
+			connectedElevMap[id] = elev
+			IPlist = IPlist[:0]
+			for key, _ := range connectedElevMap{
+				IPlist = append(IPlist, key)
+			}
+			sort.Strings(IPlist)
+			if IPlist[0] == myIP {
+				isMaster = true
+			} else {
+				isMaster = false
+			}
+			fmt.Println("Currently connected elevators: ", IPlist)
+
+		case msg := <-newMsgToMasterChan:
+			var IP string
+			var newOrder elevManager.OrderQueue
+			Msg:
+			switch msg.MessageId {
+
+			case message.NewOrder:
+				for i := 0; i < N_FLOORS; i++ {
+					newOrder.Internal[i] = msg.OrderQueue[i]
+					newOrder.Down[i] = msg.OrderQueue[(i + 4)]
+					newOrder.Up[i] = msg.OrderQueue[(i + 8)]
+
+				}
+				//uniqueOrder := true
+				orderCost := MAX_ORDER_COST
+				if isMaster && !*offline {
+					for _, elev := range connectedElevMap{
+						//fmt.Println(elev)
+						if !elev.newOrder(newOrder) {
+
+							//uniqueOrder = false
+							fmt.Println("not unique")
+							break Msg
+						}
+						tempOrderCost, tempIP := elev.cost(newOrder)
+						if tempOrderCost < orderCost {
+							orderCost = tempOrderCost
+							//fmt.Println("temp ip", tempIP)
+							IP = tempIP
+						}
+					}
+					msg.ToIP = IP
+					if IP == "" {
+						fmt.Println("error in assigning elevator, order deleted")
+						break
+					}
+
+					//update masters copy of the queue
+						//fmt.Println("unique order, elev IP", IP)
+					for i := 0; i < N_FLOORS; i++ {
+						if newOrder.Up[i] == 1 {
+							elev = connectedElevMap[IP]
+							elev.queue.Up[i] = 1
+							connectedElevMap[IP] = elev
+						}
+						if newOrder.Down[i] == 1 {
+							elev = connectedElevMap[IP]
+							elev.queue.Down[i] = 1
+							connectedElevMap[IP] = elev
+						}
+					}
+					msg.MessageId = message.NewOrderFromMaster
+					newOrderFromMasterChan <- msg // send ON UDP
+
+				}
+				for i := 0; i < N_FLOORS; i++ {
+					if newOrder.Internal[i] == 1 {
+						elev = connectedElevMap[msg.FromIP]
+						elev.queue.Internal[i] = 1
+						connectedElevMap[msg.FromIP] = elev
+					}
+				}
+				break
+
+			case message.NewOrderFromMaster:
+				for i := 0; i < N_FLOORS; i++ {
+					newOrder.Internal[i] = msg.OrderQueue[i]
+					newOrder.Down[i] = msg.OrderQueue[(i + 4)]
+					newOrder.Up[i] = msg.OrderQueue[(i + 8)]
+
+				}
+				if !isMaster {
+					IP := msg.ToIP
+					elev = connectedElevMap[IP]
+					for i := 0; i < N_FLOORS; i++ {
+						if newOrder.Up[i] == 1 {
+							elev.queue.Up[i] = 1
+						}
+						if newOrder.Down[i] == 1 {
+							elev.queue.Down[i] = 1
+						}
+					}
+					connectedElevMap[IP] = elev
+				}
+
+			case message.ElevatorStateUpdate:
+				elev = connectedElevMap[msg.FromIP]
+				elev.direction = msg.ElevatorStateUpdate[0]
+				elev.currentFloor = msg.ElevatorStateUpdate[1]
+				//fmt.Println("last queue : ", elev.queue)
+				for i := 0; i < N_FLOORS; i++ {
+					elev.queue.Internal[i] = msg.OrderQueue[i]
+					elev.queue.Down[i] = msg.OrderQueue[i+4]
+					elev.queue.Up[i] = msg.OrderQueue[i+8]
+				}
+				connectedElevMap[msg.FromIP] = elev
+				//fmt.Println("newQueue : ", elev.queue)
+
+				var lights elevManager.OrderQueue
+				for _, elevator := range connectedElevMap {
+					//fmt.Println("heis :",elevator.queue
+					for floor := 0; floor < N_FLOORS; floor++ {
+						if elevator.queue.Up[floor] == 1 {
+							lights.Up[floor] = 1
+						}
+						if elevator.queue.Down[floor] == 1 {
+							lights.Down[floor] = 1
+						}
+					}
+
+				}
+				//fmt.Println("lights UP: ", lights.Up, "lights down :", lights.Down)
+				for floor := 0; floor < N_FLOORS; floor++ {
+					if lights.Down[floor] == 0 && floor != BOTTOM_FLOOR {
+						setLightChan <- elevManager.LightCommand{1, floor, 0}
+					}
+					if lights.Up[floor] == 0 && floor != TOP_FLOOR {
+						setLightChan <- elevManager.LightCommand{0, floor, 0}
+					}
+				}
+				break
+			}
+		case noNetwork := <- networkStatus:
+			if(noNetwork){
+				var order elevManager.OrderQueue
+				for _, elevator := range connectedElevMap{
+					for floor := 0; floor < N_FLOORS; floor++ {
+						if elevator.queue.Up[floor] == 1 {
+							order.Up[floor] = 1
+						}
+						if elevator.queue.Down[floor] == 1 {
+							order.Down[floor] = 1
+						}
+					}
+				}
+				newNetworkOrderToElevManagerChan <- order	
+			}
+
+
+
+		}
+	}
+}
+
+
+
 func (elev elevator) cost(order elevManager.OrderQueue) (int, string) {
-	// do cost calculation on order
-	//return cost value and IP
 	const dirCost = 2
 	const distCost = 4
 	const numOrderCost = 6
@@ -78,376 +434,4 @@ func (elev elevator) newOrder(order elevManager.OrderQueue) bool {
 
 	}
 	return true
-}
-
-func main() { //function should be renamed afterwards, this is just for testing
-	var myIP string
-	for {
-		myIP = network.GetNetworkIP()
-		if !(myIP == "::1") {
-			break
-		}
-		fmt.Println("No network connection")
-		time.Sleep(time.Second * 1)
-	}
-	NetworkConnect(0)
-	fmt.Println("My IP", myIP)
-
-	//UDP channels
-	UDPSendMsgChan := make(chan message.UDPMessage, 100)
-	UDPPingReceivedChan := make(chan message.UDPMessage, 100)
-	UDPMsgReceivedChan := make(chan message.UDPMessage, 100)
-
-	checkNetworkConChan := make(chan bool)
-	restartUDPSendChan := make(chan bool)
-
-	//Channels to elevManager
-	NewNetworkOrderToSM := make(chan elevManager.OrderQueue, 100)
-	NewNetworkOrderFromSM := make(chan elevManager.OrderQueue, 100)
-	stateUpdateFromSM := make(chan message.UDPMessage, 100)
-	requestStateUpdateChan := make(chan bool, 100)
-
-	// Channels to master thread
-	NewMsgToMasterChan := make(chan message.UDPMessage, 100)
-	NewOrderFromMasterChan := make(chan message.UDPMessage, 100)
-	lightCommandChan := make(chan elevManager.LightCommand, 100)
-	elevatorAddedChan := make(chan string, 100)
-	elevatorRemovedChan := make(chan string, 100)
-	networkStatus := make(chan bool, 100)
-
-	//Init sockets for sending ping and messages
-	UDPlistenConn := network.ServerConnectUDP()
-	network.StartUDPSend(UDPSendMsgChan, restartUDPSendChan, myIP)
-	offline := false
-	// Goroutines
-	go network.UDPlisten(UDPlistenConn, UDPPingReceivedChan, UDPMsgReceivedChan)
-	go network.CheckNetworkConnection(checkNetworkConChan)
-	go masterThread(NewNetworkOrderToSM,networkStatus, lightCommandChan, elevatorAddedChan, elevatorRemovedChan, NewMsgToMasterChan, NewOrderFromMasterChan, myIP)
-	go elevManager.ElevManager(&offline,requestStateUpdateChan, lightCommandChan, NewNetworkOrderFromSM, NewNetworkOrderToSM, stateUpdateFromSM)
-
-	connectedElevTimers := make(map[string]*time.Timer)
-	
-	for {
-		select {
-		case msg := <-UDPPingReceivedChan:
-			_, exists := connectedElevTimers[msg.FromIP]
-			if exists {
-				connectedElevTimers[msg.FromIP].Reset(time.Second)
-
-			} else {
-				elevatorAddedChan <- msg.FromIP
-				connectedElevTimers[msg.FromIP] = time.AfterFunc(time.Second, func() { deleteElevator(&connectedElevTimers, msg, elevatorRemovedChan) })
-				requestStateUpdateChan <- true
-				fmt.Println("adding new elevator")
-
-			}
-
-		case msg := <-NewOrderFromMasterChan:
-			UDPSendMsgChan <- msg
-
-		case msg := <-UDPMsgReceivedChan:
-
-			// send udpmessage to correct routine
-			switch msg.MessageId {
-			case message.ElevatorStateUpdate, message.NewOrder:
-				NewMsgToMasterChan <- msg
-
-			case message.NewOrderFromMaster:
-				//tenn lys på n heiser
-				//fmt.Println("new order from master ", msg.OrderQueue)
-				//fmt.Println("kommer jeg forbi her")
-				var light elevManager.LightCommand
-				for i := 0; i < N_FLOORS; i++ {
-					if msg.OrderQueue[i+4] == 1 {
-						light = [3]int{1, i, 1}
-						lightCommandChan <- light
-						break
-
-					}
-					if msg.OrderQueue[i+8] == 1 {
-						light = [3]int{0, i, 1}
-						lightCommandChan <- light
-						break
-					}
-				}
-
-				///////////////////////////
-				// Make all copies update elevators queues
-				NewMsgToMasterChan <- msg
-				if msg.ToIP == myIP {
-
-					var order elevManager.OrderQueue
-					for i := 0; i < 4; i++ {
-						order.Internal[i] = msg.OrderQueue[i]
-						order.Up[i] = msg.OrderQueue[(i + 8)]
-						order.Down[i] = msg.OrderQueue[(i + 4)]
-					}
-					NewNetworkOrderToSM <- order
-				}
-			}
-
-		case order := <-NewNetworkOrderFromSM:
-			//create UDP message and send via UDP
-			var msg message.UDPMessage
-			msg.MessageId = message.NewOrder
-			msg.FromIP = myIP
-			for i := 0; i < 4; i++ {
-				msg.OrderQueue[i] = order.Internal[i]
-				msg.OrderQueue[(i + 4)] = order.Down[i]
-				msg.OrderQueue[(i + 8)] = order.Up[i]
-
-			}
-			//calculate checksum?
-			if !offline {
-				UDPSendMsgChan <- msg
-			}
-		case msg := <-stateUpdateFromSM:
-			msg.MessageId = message.ElevatorStateUpdate
-			msg.FromIP = myIP
-			//msg.Checksum = CalculateCheckSum(msg)
-			if !offline {
-				UDPSendMsgChan <- msg
-			}
-		case haveNetwork := <-checkNetworkConChan:
-			if haveNetwork {
-				offline = false
-				network.StartUDPSend(UDPSendMsgChan, restartUDPSendChan, myIP)
-				networkStatus <- true
-			} else {
-				offline = true
-				restartUDPSendChan <- true
-				networkStatus <-false
-
-			}
-
-		}
-
-	}
-
-}
-
-func deleteElevator(connectedElevTimers *map[string]*time.Timer, msg message.UDPMessage, elevatorRemovedChan chan string) {
-	elevatorRemovedChan <- msg.FromIP
-	delete(*connectedElevTimers, msg.FromIP)
-	fmt.Println("deleting elevator :", msg.FromIP)
-}
-
-func masterThread(NewNetworkOrderToSM chan elevManager.OrderQueue, networkStatus chan bool, lightCommandChan chan elevManager.LightCommand, elevatorAddedChan chan string, elevatorRemovedChan chan string,NewMsgToMasterChan chan message.UDPMessage, NewOrderFromMasterChan chan message.UDPMessage, myIP string) {
-	numberOfelevators := 0
-	connectedElev := make(map[string]elevator)
-	master := true
-	offline := false
-	var IPlist []string
-	var elev elevator
-	for {
-		select {
-		case elevatorIP := <-elevatorRemovedChan:
-			fmt.Println("elevator should be removed ",elevatorIP)
-			IPlist = IPlist[:0]
-			numberOfelevators -= 1
-			//get all orders external from elevatorIP and send internally
-			elev = connectedElev[elevatorIP]
-			tempqueue := elev.queue
-			delete(connectedElev, elevatorIP)
-			if numberOfelevators != 0 {
-				for key, _ := range connectedElev {
-					IPlist = append(IPlist, key)
-				}
-				sort.Strings(IPlist)
-				if IPlist[0] == myIP {
-					master = true
-				} else {
-					master = false
-				}
-			}
-			fmt.Println(IPlist)
-			
-			//ask elevManager do delete queue externals
-			if elevatorIP == myIP {
-
-				offline = true
-			}
-
-			if numberOfelevators == 0 {
-				master = true
-			}
-			var msg message.UDPMessage
-			msg.MessageId = message.NewOrder
-			msg.FromIP = myIP
-			for floor := 0; floor < N_FLOORS; floor++ {
-				if tempqueue.Up[floor] == 1 {
-					msg.OrderQueue[floor+8] = 1
-					NewMsgToMasterChan <- msg
-				}
-				if tempqueue.Down[floor] == 1 {
-					msg.OrderQueue[floor+4] = 1
-					NewMsgToMasterChan <- msg
-				}
-			}
-
-		case id := <-elevatorAddedChan:
-			numberOfelevators += 1
-			offline = false
-			if numberOfelevators > N_ELEVATORS {
-				//fault tolerance
-				fmt.Println("To many elevators")
-				os.Exit(0)
-			}
-
-			elev.IP = id
-			connectedElev[id] = elev
-			IPlist = IPlist[:0]
-			for key, _ := range connectedElev {
-				IPlist = append(IPlist, key)
-			}
-			sort.Strings(IPlist)
-			if IPlist[0] == myIP {
-				master = true
-			} else {
-				master = false
-			}
-			fmt.Println(IPlist)
-
-		case msg := <-NewMsgToMasterChan:
-			var IP string
-			var newOrder elevManager.OrderQueue
-			Msg:
-			switch msg.MessageId {
-
-			case message.NewOrder:
-				for i := 0; i < N_FLOORS; i++ {
-					newOrder.Internal[i] = msg.OrderQueue[i]
-					newOrder.Down[i] = msg.OrderQueue[(i + 4)]
-					newOrder.Up[i] = msg.OrderQueue[(i + 8)]
-
-				}
-				//uniqueOrder := true
-				orderCost := MAX_ORDER_COST
-				if master && !offline {
-					for _, elev := range connectedElev {
-						//fmt.Println(elev)
-						if !elev.newOrder(newOrder) {
-
-							//uniqueOrder = false
-							fmt.Println("not unique")
-							break Msg
-						}
-						tempOrderCost, tempIP := elev.cost(newOrder)
-						if tempOrderCost < orderCost {
-							orderCost = tempOrderCost
-							//fmt.Println("temp ip", tempIP)
-							IP = tempIP
-						}
-					}
-					msg.ToIP = IP
-					if IP == "" {
-						fmt.Println("error in assigning elevator, order deleted")
-						break
-					}
-
-					//update masters copy of the queue
-						//fmt.Println("unique order, elev IP", IP)
-					for i := 0; i < N_FLOORS; i++ {
-						if newOrder.Up[i] == 1 {
-							elev = connectedElev[IP]
-							elev.queue.Up[i] = 1
-							connectedElev[IP] = elev
-						}
-						if newOrder.Down[i] == 1 {
-							elev = connectedElev[IP]
-							elev.queue.Down[i] = 1
-							connectedElev[IP] = elev
-						}
-					}
-					msg.MessageId = message.NewOrderFromMaster
-					NewOrderFromMasterChan <- msg // send ON UDP
-
-				}
-				for i := 0; i < N_FLOORS; i++ {
-					if newOrder.Internal[i] == 1 {
-						elev = connectedElev[msg.FromIP]
-						elev.queue.Internal[i] = 1
-						connectedElev[msg.FromIP] = elev
-					}
-				}
-				break
-
-			case message.NewOrderFromMaster:
-				for i := 0; i < N_FLOORS; i++ {
-					newOrder.Internal[i] = msg.OrderQueue[i]
-					newOrder.Down[i] = msg.OrderQueue[(i + 4)]
-					newOrder.Up[i] = msg.OrderQueue[(i + 8)]
-
-				}
-				if !master {
-					IP := msg.ToIP
-					elev = connectedElev[IP]
-					for i := 0; i < N_FLOORS; i++ {
-						if newOrder.Up[i] == 1 {
-							elev.queue.Up[i] = 1
-						}
-						if newOrder.Down[i] == 1 {
-							elev.queue.Down[i] = 1
-						}
-					}
-					connectedElev[IP] = elev
-				}
-
-			case message.ElevatorStateUpdate:
-				elev = connectedElev[msg.FromIP]
-				elev.direction = msg.ElevatorStateUpdate[0]
-				elev.currentFloor = msg.ElevatorStateUpdate[1]
-				//fmt.Println("last queue : ", elev.queue)
-				for i := 0; i < N_FLOORS; i++ {
-					elev.queue.Internal[i] = msg.OrderQueue[i]
-					elev.queue.Down[i] = msg.OrderQueue[i+4]
-					elev.queue.Up[i] = msg.OrderQueue[i+8]
-				}
-				connectedElev[msg.FromIP] = elev
-				//fmt.Println("newQueue : ", elev.queue)
-
-				var lights elevManager.OrderQueue
-				for _, elevator := range connectedElev {
-					//fmt.Println("heis :",elevator.queue
-					for floor := 0; floor < N_FLOORS; floor++ {
-						if elevator.queue.Up[floor] == 1 {
-							lights.Up[floor] = 1
-						}
-						if elevator.queue.Down[floor] == 1 {
-							lights.Down[floor] = 1
-						}
-					}
-
-				}
-				//fmt.Println("lights UP: ", lights.Up, "lights down :", lights.Down)
-				for floor := 0; floor < N_FLOORS; floor++ {
-					if lights.Down[floor] == 0 && floor != BOTTOM_FLOOR {
-						lightCommandChan <- elevManager.LightCommand{1, floor, 0}
-					}
-					if lights.Up[floor] == 0 && floor != TOP_FLOOR {
-						lightCommandChan <- elevManager.LightCommand{0, floor, 0}
-					}
-				}
-				break
-			}
-		case noNetwork := <- networkStatus:
-			if(noNetwork){
-				var order elevManager.OrderQueue
-				for _, elevator := range connectedElev {
-					for floor := 0; floor < N_FLOORS; floor++ {
-						if elevator.queue.Up[floor] == 1 {
-							order.Up[floor] = 1
-						}
-						if elevator.queue.Down[floor] == 1 {
-							order.Down[floor] = 1
-						}
-					}
-				}
-				NewNetworkOrderToSM <- order	
-			}
-
-
-
-		}
-	}
 }
