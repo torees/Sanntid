@@ -13,10 +13,12 @@ type Elev_dir int
 type Button_type int
 
 const (
-	N_FLOORS = 4
-	BOTTOM_FLOOR = 0
-	TOP_FLOOR = 3
-	N_ELEVATORS = 3
+	N_FLOORS           = 4
+	BOTTOM_FLOOR       = 0
+	TOP_FLOOR          = 3
+	N_ELEVATORS        = 3
+	DOWN_ROOT_POSITION = 4
+	UP_ROOT_POSITION   = 8
 )
 const (
 	DOWN Elev_dir = -1

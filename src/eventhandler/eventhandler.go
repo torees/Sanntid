@@ -3,21 +3,17 @@ package main
 import (
 	. "../driver"
 	"../elevManager"
+	. "../elevator"
 	"../message"
 	. "../network"
-	. "../elevator"
 	"fmt"
 	"os"
+	"os/signal"
 	"sort"
 	"time"
-	"os/signal"
 )
 
-
-
-
-
-func main() { 
+func main() {
 	var myIP string
 	for {
 		myIP = GetNetworkIP()
@@ -35,7 +31,6 @@ func main() {
 	UDPMsgReceivedChan := make(chan message.UDPMessage, 100)
 	restartUDPSendChan := make(chan bool)
 	checkNetworkConChan := make(chan bool)
-	
 
 	newNetworkOrderToElevManagerChan := make(chan elevManager.OrderQueue, 100)
 	newNetworkOrderFromElevManagerChan := make(chan elevManager.OrderQueue, 100)
@@ -50,17 +45,16 @@ func main() {
 	networkStatus := make(chan bool, 100)
 	keyboardInterruptChan := make(chan os.Signal)
 
-
 	StartUDPSend(UDPSendMsgChan, restartUDPSendChan, myIP)
 
 	go UDPlisten(UDPPingReceivedChan, UDPMsgReceivedChan)
 	go CheckNetworkConnection(checkNetworkConChan)
-	go master(&offline,newNetworkOrderToElevManagerChan,networkStatus, setLightChan, elevatorAddedChan, elevatorRemovedChan, newMsgToMasterChan, newOrderFromMasterChan, myIP)
-	go elevManager.ElevManager(&offline,stateUpdateChan,requestStateUpdateChan, setLightChan, newNetworkOrderFromElevManagerChan, newNetworkOrderToElevManagerChan )
+	go master(&offline, newNetworkOrderToElevManagerChan, networkStatus, setLightChan, elevatorAddedChan, elevatorRemovedChan, newMsgToMasterChan, newOrderFromMasterChan, myIP)
+	go elevManager.ElevManager(&offline, stateUpdateChan, requestStateUpdateChan, setLightChan, newNetworkOrderFromElevManagerChan, newNetworkOrderToElevManagerChan)
 
 	connectedElevTimers := make(map[string]*time.Timer)
-	signal.Notify(keyboardInterruptChan, os.Interrupt) //Catch keyboard interrupts (Ctrl+C)	
-	
+	signal.Notify(keyboardInterruptChan, os.Interrupt) //Catch keyboard interrupts (Ctrl+C)
+
 	for {
 		select {
 		case msg := <-UDPPingReceivedChan:
@@ -83,17 +77,17 @@ func main() {
 				newMsgToMasterChan <- msg
 
 			case message.NewOrderFromMaster:
-				//Light external orderbuttons for all connected elevators
+
 				var light elevManager.LightCommand
-				for i := 0; i < N_FLOORS; i++ {
-					if msg.OrderQueue[i+4] == 1 {
-						light = [3]int{1, i, 1}
+				for floor := BOTTOM_FLOOR; floor < N_FLOORS; floor++ {
+					if msg.OrderQueue[floor+DOWN_ROOT_POSITION] == 1 {
+						light = elevManager.LightCommand{1, floor, 1}
 						setLightChan <- light
 						break
 
 					}
-					if msg.OrderQueue[i+8] == 1 {
-						light = [3]int{0, i, 1}
+					if msg.OrderQueue[floor+UP_ROOT_POSITION] == 1 {
+						light = elevManager.LightCommand{0, floor, 1}
 						setLightChan <- light
 						break
 					}
@@ -104,10 +98,10 @@ func main() {
 
 				if msg.ToIP == myIP {
 					var order elevManager.OrderQueue
-					for i := 0; i < 4; i++ {
-						order.Internal[i] = msg.OrderQueue[i]
-						order.Up[i] = msg.OrderQueue[(i + 8)]
-						order.Down[i] = msg.OrderQueue[(i + 4)]
+					for floor := BOTTOM_FLOOR; floor < N_FLOORS; floor++ {
+						order.Internal[floor] = msg.OrderQueue[floor]
+						order.Up[floor] = msg.OrderQueue[(floor + UP_ROOT_POSITION)]
+						order.Down[floor] = msg.OrderQueue[(floor + DOWN_ROOT_POSITION)]
 					}
 					newNetworkOrderToElevManagerChan <- order
 				}
@@ -118,15 +112,14 @@ func main() {
 				var msg message.UDPMessage
 				msg.MessageId = message.NewOrder
 				msg.FromIP = myIP
-				msg.OrderQueue = elevManager.AssembleMessageQueue(order)			
+				msg.OrderQueue = elevManager.AssembleMessageQueue(order)
 				UDPSendMsgChan <- msg
 			}
-
 
 		case msg := <-stateUpdateChan:
 			if !offline {
 				msg.MessageId = message.ElevatorStateUpdate
-				msg.FromIP = myIP			
+				msg.FromIP = myIP
 				UDPSendMsgChan <- msg
 			}
 
@@ -138,7 +131,7 @@ func main() {
 			} else {
 				offline = true
 				restartUDPSendChan <- true
-				networkStatus <-false
+				networkStatus <- false
 			}
 
 		case <-keyboardInterruptChan:
@@ -157,9 +150,9 @@ func deleteElevator(connectedElevTimers *map[string]*time.Timer, msg message.UDP
 	delete(*connectedElevTimers, msg.FromIP)
 }
 
-func isElevMaster(connectedElevMap map[string]Elevator,myIP string)bool{
+func isElevMaster(connectedElevMap map[string]Elevator, myIP string) bool {
 	var IPlist []string
-	
+
 	for key, _ := range connectedElevMap {
 		IPlist = append(IPlist, key)
 	}
@@ -167,49 +160,44 @@ func isElevMaster(connectedElevMap map[string]Elevator,myIP string)bool{
 	fmt.Println("Currently connected Elevators: ", IPlist)
 	if IPlist[0] == myIP {
 		return true
-	
+
 	} else {
 		return false
-	
+
 	}
 }
 
-
-
-func master(offline *bool, newNetworkOrderToElevManagerChan chan elevManager.OrderQueue, networkStatus chan bool, setLightChan chan elevManager.LightCommand, elevatorAddedChan chan string, elevatorRemovedChan chan string,newMsgToMasterChan chan message.UDPMessage, newOrderFromMasterChan chan message.UDPMessage, myIP string) {
+func master(offline *bool, newNetworkOrderToElevManagerChan chan elevManager.OrderQueue, networkStatus chan bool, setLightChan chan elevManager.LightCommand, elevatorAddedChan chan string, elevatorRemovedChan chan string, newMsgToMasterChan chan message.UDPMessage, newOrderFromMasterChan chan message.UDPMessage, myIP string) {
 	numberOfElev := 0
 	connectedElevMap := make(map[string]Elevator)
 	isMaster := true
-	
-	
 
 	for {
 		var elev Elevator
 		select {
-		
+
 		case elevatorIP := <-elevatorRemovedChan:
 			numberOfElev -= 1
 			elev = connectedElevMap[elevatorIP]
 			tempqueue := elev.Queue
-			delete(connectedElevMap, elevatorIP)			
-
+			delete(connectedElevMap, elevatorIP)
 
 			if numberOfElev == 0 {
 				isMaster = true
-			}else{
-				isMaster=isElevMaster(connectedElevMap,myIP)
+			} else {
+				isMaster = isElevMaster(connectedElevMap, myIP)
 			}
 
 			var msg message.UDPMessage
 			msg.MessageId = message.NewOrder
 			msg.FromIP = myIP
-			for floor := 0; floor < N_FLOORS; floor++ {
+			for floor := BOTTOM_FLOOR; floor < N_FLOORS; floor++ {
 				if tempqueue.Up[floor] == 1 {
-					msg.OrderQueue[floor+8] = 1
+					msg.OrderQueue[floor+UP_ROOT_POSITION] = 1
 					newMsgToMasterChan <- msg
 				}
 				if tempqueue.Down[floor] == 1 {
-					msg.OrderQueue[floor+4] = 1
+					msg.OrderQueue[floor+DOWN_ROOT_POSITION] = 1
 					newMsgToMasterChan <- msg
 				}
 			}
@@ -223,22 +211,21 @@ func master(offline *bool, newNetworkOrderToElevManagerChan chan elevManager.Ord
 
 			elev.IP = elevatorIP
 			connectedElevMap[elevatorIP] = elev
-			isMaster = isElevMaster(connectedElevMap,myIP)
+			isMaster = isElevMaster(connectedElevMap, myIP)
 
 		case msg := <-newMsgToMasterChan:
 			var IP string
 			var newOrder elevManager.OrderQueue
-			Msg:
+		Msg:
 			switch msg.MessageId {
 
 			case message.NewOrder:
 
 				newOrder = elevManager.DisassembleMessageQueue(msg.OrderQueue)
-				
 
 				orderCost := MAX_ORDER_COST
 				if isMaster && !*offline {
-					for _, elev = range connectedElevMap{
+					for _, elev = range connectedElevMap {
 						if !elev.NewOrder(newOrder) {
 							break Msg
 						}
@@ -252,7 +239,7 @@ func master(offline *bool, newNetworkOrderToElevManagerChan chan elevManager.Ord
 					if IP == "" {
 						break
 					}
-					for floor := 0; floor < N_FLOORS; floor++ {
+					for floor := BOTTOM_FLOOR; floor < N_FLOORS; floor++ {
 						if newOrder.Up[floor] == 1 {
 							elev = connectedElevMap[IP]
 							elev.Queue.Up[floor] = 1
@@ -265,10 +252,10 @@ func master(offline *bool, newNetworkOrderToElevManagerChan chan elevManager.Ord
 						}
 					}
 					msg.MessageId = message.NewOrderFromMaster
-					newOrderFromMasterChan <- msg 
+					newOrderFromMasterChan <- msg
 
 				}
-				for floor := 0; floor < N_FLOORS; floor++ {
+				for floor := BOTTOM_FLOOR; floor < N_FLOORS; floor++ {
 					if newOrder.Internal[floor] == 1 {
 						elev = connectedElevMap[msg.FromIP]
 						elev.Queue.Internal[floor] = 1
@@ -283,7 +270,7 @@ func master(offline *bool, newNetworkOrderToElevManagerChan chan elevManager.Ord
 				if !isMaster {
 					IP := msg.ToIP
 					elev = connectedElevMap[IP]
-					for floor := 0; floor < N_FLOORS; floor++ {
+					for floor := BOTTOM_FLOOR; floor < N_FLOORS; floor++ {
 						if newOrder.Up[floor] == 1 {
 							elev.Queue.Up[floor] = 1
 						}
@@ -297,14 +284,14 @@ func master(offline *bool, newNetworkOrderToElevManagerChan chan elevManager.Ord
 			case message.ElevatorStateUpdate:
 				elev = connectedElevMap[msg.FromIP]
 				elev.Direction = msg.ElevatorStateUpdate[0]
-				elev.CurrentFloor = msg.ElevatorStateUpdate[1]				
+				elev.CurrentFloor = msg.ElevatorStateUpdate[1]
 				elev.Queue = elevManager.DisassembleMessageQueue(msg.OrderQueue)
-				
+
 				connectedElevMap[msg.FromIP] = elev
 
 				var lights elevManager.OrderQueue
 				for _, elevator := range connectedElevMap {
-					for floor := 0; floor < N_FLOORS; floor++ {
+					for floor := BOTTOM_FLOOR; floor < N_FLOORS; floor++ {
 						if elevator.Queue.Up[floor] == 1 {
 							lights.Up[floor] = 1
 						}
@@ -314,7 +301,7 @@ func master(offline *bool, newNetworkOrderToElevManagerChan chan elevManager.Ord
 					}
 
 				}
-				for floor := 0; floor < N_FLOORS; floor++ {
+				for floor := BOTTOM_FLOOR; floor < N_FLOORS; floor++ {
 					if lights.Down[floor] == 0 && floor != BOTTOM_FLOOR {
 						setLightChan <- elevManager.LightCommand{1, floor, 0}
 					}
@@ -324,11 +311,11 @@ func master(offline *bool, newNetworkOrderToElevManagerChan chan elevManager.Ord
 				}
 				break
 			}
-		case noNetwork := <- networkStatus:
-			if(noNetwork){
+		case noNetwork := <-networkStatus:
+			if noNetwork {
 				var order elevManager.OrderQueue
-				for _, elevator := range connectedElevMap{
-					for floor := 0; floor < N_FLOORS; floor++ {
+				for _, elevator := range connectedElevMap {
+					for floor := BOTTOM_FLOOR; floor < N_FLOORS; floor++ {
 						if elevator.Queue.Up[floor] == 1 {
 							order.Up[floor] = 1
 						}
@@ -337,12 +324,9 @@ func master(offline *bool, newNetworkOrderToElevManagerChan chan elevManager.Ord
 						}
 					}
 				}
-				newNetworkOrderToElevManagerChan <- order	
+				newNetworkOrderToElevManagerChan <- order
 			}
-
-
 
 		}
 	}
 }
-
